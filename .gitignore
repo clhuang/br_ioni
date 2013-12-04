@@ -1,0 +1,8 @@
+*.o
+*.pyc
+ioni
+data
+*.so
+datasmall
+data
+datalarge

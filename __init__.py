@@ -40,7 +40,7 @@ class EmissivityRenderer(Renderer):
     zcutoff = -1.0  # the point at which we are considered to be no longer in the chromosphere
     locph = prev_lambd = float('nan')
 
-    ux = uy = uz = e = r = oscdata = ka_table = None
+    ux = uy = uz = e = r = oscdata = ka_table = opatab = None
 
     def __init__(self, cuda_code, data_dir=DEFAULT_LOC, snap=None):
         Renderer.__init__(self, cuda_code)
@@ -55,7 +55,6 @@ class EmissivityRenderer(Renderer):
             self.acont_filenames = gpuparamfile.readline().split()
 
         self.rhoeetab = Rhoeetab(fdir=data_dir)
-        self.opatab = Opatab(fdir=data_dir)
 
         self.nrhobin = self.rhoeetab.params['nrhobin']
         self.dmin = m.log(self.rhoeetab.params['rhomin'])
@@ -147,6 +146,8 @@ class EmissivityRenderer(Renderer):
         self.set_axes(xaxis, yaxis, zaxis)
 
     def set_lambd(self, lambd=None):
+        if self.opatab is None:
+            self.opatab = Opatab(fdir=self.data_dir)
         if lambd is None:
             lambd = CCA / self.ny0[0]
         if lambd != self.prev_lambd:
@@ -352,7 +353,6 @@ class TDIEmRenderer(EmissivityRenderer):
         super(TDIEmRenderer, self).__init__(TDICUDACODE, data_dir=data_dir)
 
         rhoeetab = Rhoeetab(fdir=data_dir)
-        self.opatab = Opatab(fdir=data_dir)
 
         self.nrhobin = rhoeetab.params['nrhobin']
         self.dmin = m.log(rhoeetab.params['rhomin'])
@@ -607,3 +607,31 @@ class MultRenderer:
             emiss += demiss
 
         return emiss
+
+
+def savearray(name, array):
+    '''
+    Saves an array in a binary format.
+    File has format (int number of dimensions), (int xsize), (int ysize) .... (int lastdimensionsize),
+    (lots of float32s that make up the remainder of the data, in C array format).
+    '''
+    header = np.memmap(name, dtype='int32', offset=0, shape=(1 + len(array.shape)), mode='w+')
+    restofdata = np.memmap(name, dtype='float32', offset=4 * (len(array.shape) + 1), shape=(array.shape), mode='w+')
+    header[:] = (len(array.shape), ) + array.shape
+    print header[:]
+    restofdata[:] = array
+    restofdata.flush()
+    header.flush()
+
+
+def loadarray(name):
+    '''
+    Loads an array saved with savearray.
+    Honestly, if you're just going to use python, please just use np.save().
+    '''
+    header = np.memmap(name, dtype='int32', offset=0, shape=(1,), mode='r')
+    ndims = header[0]
+    header = np.memmap(name, dtype='int32', offset=0, shape=(1 + ndims,), mode='r')
+    restofdata = np.memmap(name, dtype='float32', offset=4 * (ndims + 1), shape=tuple(header[1:]), mode='r')
+    header.flush()
+    return restofdata
