@@ -568,56 +568,49 @@ class TDIEmRenderer(EmissivityRenderer):
             self.ka_table = self.opatab.h_he_absorb(lambd)
 
 
-class MultRenderer:
-    '''
-    Class that stacks multiple renders together.
-    '''
-    def __init__(self, renderer):
-        self.srend = renderer
+def mult_render(self, renderer, sdomain, edomain, step=1, lambd=None, channel=0, il_render=False,
+                opacity=True, curvature=False, fw=None, along_x=True):
+    tau = None
+    emiss = 0
+    altitude = 0
 
-    def mult_render(self, sdomain, edomain, step=1, lambd=None, channel=0, il_render=False,
-                    opacity=True, curvature=False, fw=None, along_x=True):
-        tau = None
-        emiss = 0
-        altitude = 0
+    renderer.x_pixel_offset = renderer.y_pixel_offset = 0
+    renderer.update_axes(0.0)
 
-        self.srend.x_pixel_offset = self.srend.y_pixel_offset = 0
-        self.srend.update_axes(0.0)
+    mdomain = (sdomain + edomain) / 2
+    zrange = np.ptp(renderer.zaxis)
+    dtheta = m.atan(np.ptp(renderer.yaxis) / RSUN)
 
-        mdomain = (sdomain + edomain) / 2
-        zrange = np.ptp(self.srend.zaxis)
-        dtheta = m.atan(np.ptp(self.srend.yaxis) / RSUN)
+    renderer.set_lambd(lambd)
 
-        self.srend.set_lambd(lambd)
+    for cdomain in xrange(sdomain, edomain + 1, step):
+        renderer.set_snap(cdomain)
 
-        for cdomain in xrange(sdomain, edomain + 1, step):
-            self.srend.set_snap(cdomain)
+        offset = 0
+        if curvature:  # tilt/shift
+            altitude = dtheta * (mdomain - cdomain) / step
+            offset = (zrange / 2 + RSUN) * (m.cos(altitude) - 1)
+            renderer.y_pixel_offset = offset / renderer.distance_per_pixel
 
-            offset = 0
-            if curvature:  # tilt/shift
-                altitude = dtheta * (mdomain - cdomain) / step
-                offset = (zrange / 2 + RSUN) * (m.cos(altitude) - 1)
-                self.srend.y_pixel_offset = offset / self.srend.distance_per_pixel
+        print("Rendering time " + str(cdomain) + " with altitude " +
+              str(m.degrees(altitude)) + " offset " + str(offset))
 
-            print("Rendering time " + str(cdomain) + " with altitude " +
-                  str(m.degrees(altitude)) + " offset " + str(offset))
-
-            if il_render:
-                output = self.srend.il_render(channel, 0 if along_x else 90, altitude, tau=tau, opacity=opacity, fw=fw)
-                if opacity:
-                    demiss, _, tau = output
-                else:
-                    demiss, _ = output
+        if il_render:
+            output = renderer.il_render(channel, 0 if along_x else 90, altitude, tau=tau, opacity=opacity, fw=fw)
+            if opacity:
+                demiss, _, tau = output
             else:
-                output = self.srend.i_render(channel, 0 if along_x else 90, altitude, tau=tau, opacity=opacity, fw=fw)
-                if opacity:
-                    demiss, tau = output
-                else:
-                    demiss = output
+                demiss, _ = output
+        else:
+            output = renderer.i_render(channel, 0 if along_x else 90, altitude, tau=tau, opacity=opacity, fw=fw)
+            if opacity:
+                demiss, tau = output
+            else:
+                demiss = output
 
-            emiss += demiss
+        emiss += demiss
 
-        return emiss
+    return emiss
 
 
 def savearray(name, array):
@@ -646,7 +639,3 @@ def loadarray(name):
     restofdata = np.memmap(name, dtype='float32', offset=4 * (ndims + 1), shape=tuple(header[1:]), mode='r')
     header.flush()
     return restofdata
-
-import sys
-if __name__ == '__main__':
-    print "hi"
