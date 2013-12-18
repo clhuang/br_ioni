@@ -39,6 +39,7 @@ DEFAULT_PARAMFILE = 'oxygen-II-VII-iris'
 class EmissivityRenderer(Renderer):
     zcutoff = -1.0  # the point at which we are considered to be no longer in the chromosphere
     locph = prev_lambd = float('nan')
+    snap = 0
 
     ux = uy = uz = e = r = oscdata = ka_table = opatab = None
 
@@ -112,6 +113,7 @@ class EmissivityRenderer(Renderer):
         Sets the timestamp with which to view the data.
         snap should be an integer between snap_range[0] and snap_range[1], inclusive
         '''
+        self.snap = snap
         if snap > self.snap_range[1] or snap < self.snap_range[0]:
             raise ValueError('Time must be in the interval (' + str(self.snap_range[0]) +
                              ', ' + str(self.snap_range[1]) + ')')
@@ -144,15 +146,6 @@ class EmissivityRenderer(Renderer):
         zaxis = zaxis[:self.locph]
 
         self.set_axes(xaxis, yaxis, zaxis)
-
-    def set_lambd(self, lambd=None):
-        if self.opatab is None:
-            self.opatab = Opatab(fdir=self.data_dir)
-        if lambd is None:
-            lambd = CCA / self.ny0[0]
-        if lambd != self.prev_lambd:
-            self.prev_lambd = lambd
-            self.ka_table = self.opatab.h_he_absorb(lambd)
 
 
 class StaticEmRenderer(EmissivityRenderer):
@@ -334,6 +327,15 @@ class StaticEmRenderer(EmissivityRenderer):
 
     def channellist(self):
         return self.acont_filenames
+
+    def set_lambd(self, lambd):
+        if self.opatab is None:
+            self.opatab = Opatab(fdir=self.data_dir)
+        if lambd is None:
+            lambd = CCA / self.ny0[0]
+        if lambd != self.prev_lambd:
+            self.prev_lambd = lambd
+            self.ka_table = self.opatab.h_he_absorb(lambd)
 
 
 class TDIEmRenderer(EmissivityRenderer):
@@ -556,6 +558,15 @@ class TDIEmRenderer(EmissivityRenderer):
     def channellist(self):
         return [self.egis[t.irad].label + " -->" + self.egis[t.jrad].label for t in self.trns]
 
+    def set_lambd(self, lambd):
+        if self.opatab is None:
+            self.opatab = Opatab(fdir=self.data_dir)
+        if lambd is None:
+            lambd = self.trns[self.level].alamb
+        if lambd != self.prev_lambd:
+            self.prev_lambd = lambd
+            self.ka_table = self.opatab.h_he_absorb(lambd)
+
 
 class MultRenderer:
     '''
@@ -635,3 +646,7 @@ def loadarray(name):
     restofdata = np.memmap(name, dtype='float32', offset=4 * (ndims + 1), shape=tuple(header[1:]), mode='r')
     header.flush()
     return restofdata
+
+import sys
+if __name__ == '__main__':
+    print "hi"
