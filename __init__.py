@@ -43,17 +43,15 @@ class EmissivityRenderer(Renderer):
 
     ux = uy = uz = e = r = oscdata = ka_table = opatab = None
 
-    def __init__(self, cuda_code, data_dir=DEFAULT_LOC, snap=None):
+    def __init__(self, cuda_code, snaprange, acont_filenames,
+                 name_template, data_dir=DEFAULT_LOC, snap=None):
         Renderer.__init__(self, cuda_code)
         self.data_dir = data_dir
-        with open(data_dir + '/gpuparam.txt') as gpuparamfile:
-            self.template = gpuparamfile.readline().strip() + '%03i'
-            self.snap_range = [int(i) for i in gpuparamfile.readline().split()]  # range of timesteps
-            if snap is None:
-                snap = self.snap_range[0]
-            gpuparamfile.readline().strip()
-            int(gpuparamfile.readline())
-            self.acont_filenames = gpuparamfile.readline().split()
+        self.template = name_template
+        self.snap_range = snaprange
+        if snap is None:
+            snap = self.snap_range[0]
+        self.acont_filenames = acont_filenames
 
         self.rhoeetab = Rhoeetab(fdir=data_dir)
 
@@ -149,6 +147,41 @@ class EmissivityRenderer(Renderer):
 
         self.set_axes(xaxis, yaxis, zaxis)
 
+    def save_irender(self, name, array):
+        '''
+        Saves irender output in binary format.
+        File has format (int dimensions (2)), (int xsize), (int ysize),
+        (data array),
+        (int x-axis size), (int y-axis size), (int z-axis size),
+        (x array), (y array), (z array)
+        '''
+        with open(name, mode='wb') as newfile:
+            newfile.write(bytes(np.array((len(array.shape), ) + array.shape, dtype='int32').data))
+            newfile.write(bytes(array.data))
+            newfile.write(bytes(np.array((self.xaxis.size, self.yaxis.size, self.zaxis.size), dtype='int32').data))
+            newfile.write(bytes(self.xaxis.data))
+            newfile.write(bytes(self.yaxis.data))
+            newfile.write(bytes(self.zaxis.data))
+
+    def save_ilrender(self, name, data):
+        '''
+        Saves ilrender output in binary format.
+        File has format (int dimensions (3)), (int xsize), (int ysize), (int numfreqs),
+        (data array), (freqdiff array),
+        (int x-axis size), (int y-axis size), (int z-axis size),
+        (x array), (y array), (z array)
+        '''
+        with open(name, mode='wb') as newfile:
+            array = data[0]
+            freqdiff = data[1]
+            newfile.write(bytes(np.array((len(array.shape), ) + array.shape, dtype='int32').data))
+            newfile.write(bytes(array.data))
+            newfile.write(bytes(freqdiff.astype('float32').data))
+            newfile.write(bytes(np.array((self.xaxis.size, self.yaxis.size, self.zaxis.size), dtype='int32').data))
+            newfile.write(bytes(self.xaxis.data))
+            newfile.write(bytes(self.yaxis.data))
+            newfile.write(bytes(self.zaxis.data))
+
 
 class StaticEmRenderer(EmissivityRenderer):
     '''
@@ -166,12 +199,14 @@ class StaticEmRenderer(EmissivityRenderer):
     ntgbin = 505
     nedbin = 71
 
-    def __init__(self, data_dir=DEFAULT_LOC, snap=None):
+    def __init__(self, snaprange, acont_filenames,
+                 name_template, data_dir=DEFAULT_LOC, snap=None):
         '''
         Initializes renderer, and loads data from a directory.
         If snap is none, picks the earliest snap specified by gpuparam.txt.
         '''
-        super(StaticEmRenderer, self).__init__(SERCUDACODE, data_dir=data_dir)
+        super(StaticEmRenderer, self).__init__(SERCUDACODE, snaprange, acont_filenames,
+                                               name_template, data_dir, snap)
         self.acont_tables = []
         self.awgt = []
         self.ny0 = []
@@ -349,12 +384,14 @@ class TDIEmRenderer(EmissivityRenderer):
     level = -1
     em = None
 
-    def __init__(self, data_dir=DEFAULT_LOC, paramfile='oxygen-II-VII-iris', snap=None):
+    def __init__(self, snaprange, acont_filenames, name_template,
+                 data_dir=DEFAULT_LOC, snap=None, paramfile='oxygen-II-VII-iris'):
         '''
         Initializes renderer, and loads data from a directory and paramfile.
         If snap is none, picks the earliest snap specified by gpuparam.txt.
         '''
-        super(TDIEmRenderer, self).__init__(TDICUDACODE, data_dir=data_dir)
+        super(TDIEmRenderer, self).__init__(TDICUDACODE, snaprange, acont_filenames,
+                                            name_template, data_dir, snap)
 
         rhoeetab = Rhoeetab(fdir=data_dir)
 
@@ -621,13 +658,9 @@ def savearray(name, array):
     File has format (int number of dimensions), (int xsize), (int ysize) .... (int lastdimensionsize),
     (lots of float32s that make up the remainder of the data, in C array format).
     '''
-    header = np.memmap(name, dtype='int32', offset=0, shape=(1 + len(array.shape)), mode='w+')
-    restofdata = np.memmap(name, dtype='float32', offset=4 * (len(array.shape) + 1), shape=(array.shape), mode='w+')
-    header[:] = (len(array.shape), ) + array.shape
-    print header[:]
-    restofdata[:] = array
-    restofdata.flush()
-    header.flush()
+    with open(name, mode='wb') as newfile:
+        newfile.write(bytes(np.array((len(array.shape), ) + array.shape, dtype='int32').data))
+        newfile.write(bytes(array.data))
 
 
 def loadarray(name):
