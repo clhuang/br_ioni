@@ -3,7 +3,7 @@ import os
 import glob
 from argparse import ArgumentParser
 from Tkinter import Tk
-from tkFileDialog import askdirectory, askopenfilename
+from tkFileDialog import askopenfilename
 
 Tk().withdraw()
 
@@ -22,9 +22,9 @@ if __name__ == "__main__":
     initial_file = (args.infile if args.infile else
                     askopenfilename(title='Choose Initial Snap',
                                     filetypes=[('Aux files', '.aux')]))
+    data_dir = os.path.dirname(initial_file)
     initial_file = os.path.basename(initial_file)
     initial_file = os.path.splitext(initial_file)[0]
-    data_dir = os.path.dirname(initial_file)
 
 #determine template format
     template = initial_file.rstrip('0123456789')
