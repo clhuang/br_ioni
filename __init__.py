@@ -113,6 +113,8 @@ class EmissivityRenderer(Renderer):
         Sets the timestamp with which to view the data.
         snap should be an integer between snap_range[0] and snap_range[1], inclusive
         '''
+        if self.snap == snap:
+            return
         self.snap = snap
         if snap > self.snap_range[1] or snap < self.snap_range[0]:
             raise ValueError('Time must be in the interval (' + str(self.snap_range[0]) +
