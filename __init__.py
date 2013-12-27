@@ -6,9 +6,7 @@ from collections import namedtuple
 import numpy as np
 import pycuda.driver as cuda
 
-from bifrost import OSC_data
-from bifrost import Rhoeetab
-from bifrost import Opatab
+from bifrost import OSC_data, Rhoeetab, Opatab
 from Renderer import Renderer
 
 EE = 1.602189e-12
@@ -63,7 +61,44 @@ class EmissivityRenderer(Renderer):
         self.emin = m.log(self.rhoeetab.params['eimin'])
         self.erange = m.log(self.rhoeetab.params['eimax']) - self.emin
 
+        self.tg_table = self.rhoeetab.get_table('tg')
+        self.ne_table = self.rhoeetab.get_table('ne')
+
         self.set_snap(snap)
+
+    def i_render(self, channel, azimuth, altitude, tau=None, opacity=False, verbose=True, fw=None):
+        '''
+        Calculates the total intensity of light from a particular POV.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        fw allows setting a different wavelength for opacity calculations
+        '''
+
+    def il_render(self, channel, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
+                  tau=None, opacity=False, dnus=None, verbose=True, fw=None):
+        '''
+        Calculates intensities as a function of frequency.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        nlamb indicates number of frequencies to sample,
+        dopp_width_range indicates the range of frequencies to sample
+        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
+
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        Returns a tuple of:
+            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
+            Array of nlamb, containing the deviation from nu_0 for each index in the first table
+        Uses dnus if specified (list of deviations from the center frequency)
+        Otherwise generates test_lambdas using nlamb and dopp_width_range
+        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
+        '''
 
     def i_rendern(self, channels, azimuth, altitude, opacity=False):
         '''
@@ -155,9 +190,8 @@ class EmissivityRenderer(Renderer):
         (int x-axis size), (int y-axis size), (int z-axis size),
         (x array), (y array), (z array)
         '''
-        with open(name, mode='wb') as newfile:
-            newfile.write(bytes(np.array((len(array.shape), ) + array.shape, dtype='int32').data))
-            newfile.write(bytes(array.data))
+        savearray(name, array)
+        with open(name, mode='ab') as newfile:
             newfile.write(bytes(np.array((self.xaxis.size, self.yaxis.size, self.zaxis.size), dtype='int32').data))
             newfile.write(bytes(self.xaxis.data))
             newfile.write(bytes(self.yaxis.data))
@@ -171,16 +205,20 @@ class EmissivityRenderer(Renderer):
         (int x-axis size), (int y-axis size), (int z-axis size),
         (x array), (y array), (z array)
         '''
-        with open(name, mode='wb') as newfile:
-            array = data[0]
-            freqdiff = data[1]
-            newfile.write(bytes(np.array((len(array.shape), ) + array.shape, dtype='int32').data))
-            newfile.write(bytes(array.data))
+        array = data[0]
+        freqdiff = data[1]
+        savearray(name, array)
+        with open(name, mode='ab') as newfile:
             newfile.write(bytes(freqdiff.astype('float32').data))
             newfile.write(bytes(np.array((self.xaxis.size, self.yaxis.size, self.zaxis.size), dtype='int32').data))
             newfile.write(bytes(self.xaxis.data))
             newfile.write(bytes(self.yaxis.data))
             newfile.write(bytes(self.zaxis.data))
+
+    def channellist(self):
+        '''
+        Provides a list of valid channels for use in the GUI.
+        '''
 
 
 class StaticEmRenderer(EmissivityRenderer):
@@ -211,10 +249,6 @@ class StaticEmRenderer(EmissivityRenderer):
         self.awgt = []
         self.ny0 = []
 
-# lookup tables for temperature and energy
-        self.tg_table = self.rhoeetab.get_table('tg')
-        self.ne_table = self.rhoeetab.get_table('ne')
-
         for acontfile in self.acont_filenames:
             mem = np.memmap(data_dir + '/' + acontfile, dtype='float32')
             self.acont_tables.append(mem[:self.ntgbin * self.nedbin])
@@ -224,16 +258,6 @@ class StaticEmRenderer(EmissivityRenderer):
         self.acont_tables = np.array(self.acont_tables)
 
     def i_render(self, channel, azimuth, altitude, tau=None, opacity=False, verbose=True, fw=None):
-        '''
-        Calculates the total intensity of light from a particular POV.
-
-        Channel indicates which emission spectra to look at.
-        Azimuth, altitude indicate POV.
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        fw allows setting a different wavelength for opacity calculations
-        '''
         tables = [('atex', self.acont_tables[channel]),
                   ('entex', self.ne_table),
                   ('tgtex', self.tg_table)]
@@ -282,25 +306,6 @@ class StaticEmRenderer(EmissivityRenderer):
 
     def il_render(self, channel, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
-        '''
-        Calculates intensities as a function of frequency.
-
-        Channel indicates which emission spectra to look at.
-        Azimuth, altitude indicate POV.
-        nlamb indicates number of frequencies to sample,
-        dopp_width_range indicates the range of frequencies to sample
-        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
-
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        Returns a tuple of:
-            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
-            Array of nlamb, containing the deviation from nu_0 for each index in the first table
-        Uses dnus if specified (list of deviations from the center frequency)
-        Otherwise generates test_lambdas using nlamb and dopp_width_range
-        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
-        '''
         dopp_width0 = self.ny0[channel] / CC * 1e2 * m.sqrt(2 * KB / self.awgt[channel] / MP)
 
         dny = dopp_width_range * 1.0 / nlamb * dopp_width0 * m.sqrt(TEMAX)
@@ -393,25 +398,16 @@ class TDIEmRenderer(EmissivityRenderer):
         super(TDIEmRenderer, self).__init__(TDICUDACODE, snaprange, acont_filenames,
                                             name_template, data_dir, snap)
 
-        rhoeetab = Rhoeetab(fdir=data_dir)
+        self.egis = []  # array of (ev, g, ion)
+        self.trns = []
 
-        self.nrhobin = rhoeetab.params['nrhobin']
-        self.dmin = m.log(rhoeetab.params['rhomin'])
-        self.drange = m.log(rhoeetab.params['rhomax']) - self.dmin
-        self.tg_table = rhoeetab.get_table('tg')
+        with open(data_dir + '/' + paramfile) as tdiparamf:
+            data = [line for line in tdiparamf.readlines() if line[0] != '*']
 
-        self.neibin = rhoeetab.params['neibin']
-        self.emin = m.log(rhoeetab.params['eimin'])
-        self.erange = m.log(rhoeetab.params['eimax']) - self.emin
-
-        irisfile = open(data_dir + '/' + paramfile)
-        data = [line for line in irisfile.readlines() if line[0] != '*']
-
+        #parse the tdiparamfile
         self.element_name = data.pop(0).strip()
         self.ab, self.awgt = (float(i) for i in data.pop(0).split())
         nk, nlines, _, _ = (int(i) for i in data.pop(0).split())
-        self.egis = []  # array of (ev, g, ion)
-        self.trns = []
 
         for _ in xrange(nk):
             datstring = shlex.split(data.pop(0))
@@ -438,16 +434,6 @@ class TDIEmRenderer(EmissivityRenderer):
             self.trns.append(Trn(irad, jrad, alamb, a_ul, f))
 
     def i_render(self, level, azimuth, altitude, tau=None, opacity=False, verbose=True, fw=None):
-        '''
-        Calculates the total intensity of light from a particular POV.
-
-        Level indicates what emission spectra to look at.
-        Azimuth, altitude indicate POV.
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        fw allows setting a different wavelength for opacity calculations
-        '''
         if level != self.level:
             self.em = self.get_emissivities(level)
             self.level = level
@@ -491,25 +477,6 @@ class TDIEmRenderer(EmissivityRenderer):
 
     def il_render(self, level, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
-        '''
-        Calculates intensities as a function of frequency.
-
-        Level indicates what emission spectra to look at.
-        Azimuth, altitude indicate POV.
-        nlamb indicates number of frequencies to sample,
-        dopp_width_range indicates the range of frequencies to sample
-        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
-
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        Returns a tuple of:
-            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
-            Array of nlamb, containing the deviation from nu_0 for each index in the first table
-        Uses dnus if specified (list of deviations from the center frequency)
-        Otherwise generates test_lambdas using nlamb and dopp_width_range
-        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
-        '''
         if level != self.level:
             self.em = self.get_emissivities(level)
             self.level = level
@@ -666,7 +633,7 @@ def savearray(name, array):
 def loadarray(name):
     '''
     Loads an array saved with savearray.
-    Honestly, if you're just going to use python, please just use np.save().
+    Honestly, if you're just going to use python, please just use np.save() and np.load().
     '''
     header = np.memmap(name, dtype='int32', offset=0, shape=(1,), mode='r')
     ndims = header[0]

@@ -43,9 +43,11 @@ if __name__ == "__main__":
 
     acont_filenames = [os.path.relpath(i, data_dir) for i in glob.glob(data_dir + '/data/*.dat')]
 
+#and render
     from br_ioni.Renderer import RenderGUI
     if args.rendtype == 'tdi':
         from br_ioni import TDIEmRenderer
+#prompt for time-dependent parameter file if necessary
         tdi_paramfile_abs = (args.tdiparam if args.tdiparam else
                              askopenfilename(title='Time-dependent Ionization Paramfile'))
         tdi_paramfile = os.path.relpath(tdi_paramfile_abs, data_dir)
