@@ -5,6 +5,7 @@ from threading import Thread
 from argparse import ArgumentParser
 from Tkinter import Tk
 from tkFileDialog import askopenfilename
+from Renderer import RendererController
 
 Tk().withdraw()
 
@@ -20,8 +21,7 @@ def renderer_process_init(rendertype, *args, **kwargs):
         from br_ioni import StaticEmRenderer as Renderclass
 
     rend = Renderclass(*args, **kwargs)
-    from Renderer import RendererController
-    RendererController.start(rend, *args, **kwargs)
+    RendererController.start(rend)
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -72,7 +72,6 @@ if __name__ == "__main__":
     else:
         t = Thread(target=renderer_process_init, args=('static', snap_range, acont_filenames, template),
                    kwargs=dict(data_dir=data_dir, snap=snap))
-    t.daemon = True
     t.start()
 
     while rend is None:
