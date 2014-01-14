@@ -1,11 +1,27 @@
 #!/usr/bin/env python
 import os
 import glob
+from threading import Thread
 from argparse import ArgumentParser
 from Tkinter import Tk
 from tkFileDialog import askopenfilename
 
 Tk().withdraw()
+
+rend = None
+
+
+def renderer_process_init(rendertype, *args, **kwargs):
+    global rend
+
+    if rendertype == 'tdi':
+        from br_ioni import TDIEmRenderer as Renderclass
+    else:
+        from br_ioni import StaticEmRenderer as Renderclass
+
+    rend = Renderclass(*args, **kwargs)
+    from Renderer import RendererController
+    RendererController.start(rend, *args, **kwargs)
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -46,15 +62,20 @@ if __name__ == "__main__":
 #and render
     from br_ioni.Renderer import RenderGUI
     if args.rendtype == 'tdi':
-        from br_ioni import TDIEmRenderer
 #prompt for time-dependent parameter file if necessary
         tdi_paramfile_abs = (args.tdiparam if args.tdiparam else
                              askopenfilename(title='Time-dependent Ionization Paramfile'))
         tdi_paramfile = os.path.relpath(tdi_paramfile_abs, data_dir)
 
-        s = TDIEmRenderer(data_dir=data_dir, paramfile=tdi_paramfile, snap=snap)
+        t = Thread(target=renderer_process_init, args=('tdi'),
+                   kwargs=dict(data_dir=data_dir, paramfile=tdi_paramfile, snap=snap))
     else:
-        from br_ioni import StaticEmRenderer
-        s = StaticEmRenderer(snap_range, acont_filenames, template, data_dir=data_dir, snap=snap)
+        t = Thread(target=renderer_process_init, args=('static', snap_range, acont_filenames, template),
+                   kwargs=dict(data_dir=data_dir, snap=snap))
+    t.daemon = True
+    t.start()
 
-    RenderGUI.show_renderer(s)
+    while rend is None:
+        pass
+
+    RenderGUI.show_renderer(rend)
