@@ -21,8 +21,8 @@ def renderer_process_init(rendertype, *args, **kwargs):
         from br_ioni import StaticEmRenderer as Renderclass
 
     rend = Renderclass(*args, **kwargs)
-    rend.controller = RendererController()
-    rend.controller.start(rend)
+    rend.controller = RendererController(rend)
+    rend.controller.start()
 
 if __name__ == "__main__":
     parser = ArgumentParser()
