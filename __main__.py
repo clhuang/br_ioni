@@ -15,6 +15,7 @@ rend = None
 def renderer_process_init(rendertype, *args, **kwargs):
     global rend
 
+    print rendertype
     if rendertype == 'tdi':
         from br_ioni import TDIEmRenderer as Renderclass
     else:
@@ -68,7 +69,7 @@ if __name__ == "__main__":
                              askopenfilename(title='Time-dependent Ionization Paramfile'))
         tdi_paramfile = os.path.relpath(tdi_paramfile_abs, data_dir)
 
-        t = Thread(target=renderer_process_init, args=('tdi'),
+        t = Thread(target=renderer_process_init, args=('tdi', snap_range, acont_filenames, template),
                    kwargs=dict(data_dir=data_dir, paramfile=tdi_paramfile, snap=snap))
     else:
         t = Thread(target=renderer_process_init, args=('static', snap_range, acont_filenames, template),
