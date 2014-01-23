@@ -9,15 +9,15 @@
 #define GRPH 2.3804910e-24
 #define DCF 1e7 //density conversion factor
 
-texture<float, 3, cudaReadModeElementType> dtex; // 3D texture
+texture<float, 3, cudaReadModeElementType> dtex; // 3D density texture
 texture<float, 3, cudaReadModeElementType> uxtex;
 texture<float, 3, cudaReadModeElementType> uytex;
-texture<float, 3, cudaReadModeElementType> uztex; // 3D texture
-texture<float, 3, cudaReadModeElementType> eetex; // 3D texture
-texture<float, 2, cudaReadModeElementType> atex; // 2D texture
-texture<float, 2, cudaReadModeElementType> entex; // 2D texture
-texture<float, 2, cudaReadModeElementType> tgtex; // 2D texture
-texture<float, 2, cudaReadModeElementType> katex; // 2D texture
+texture<float, 3, cudaReadModeElementType> uztex; // 3D x, y, z vel textures
+texture<float, 3, cudaReadModeElementType> eetex; // 3D internal energy texture
+texture<float, 2, cudaReadModeElementType> atex; // transfer function lookup
+texture<float, 2, cudaReadModeElementType> entex; // electron density lookup
+texture<float, 2, cudaReadModeElementType> tgtex; // temperature lookup
+texture<float, 2, cudaReadModeElementType> katex; // opacity texture
 
 __constant__ float dmin;
 __constant__ float drange;
@@ -34,6 +34,7 @@ __constant__ float tgrange;
 /**
   (en * en * g, uu, sqrt(tt))
   x, y, z is a slice-normalized, scaled vector (from realToNormalized())
+  if iRenderOnly is true, then skip calculation of uu and tt
  **/
 __device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly) {
     float d1 = __logf(tex3D(dtex, x, y, z)) + __logf(1.e-7);
@@ -58,6 +59,9 @@ __device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly
     return make_float3(en * en * g * ds, uu, sqrtf(tt));
 }
 
+/**
+   Calculates the increment of opacity for a specific point
+*/
 __device__ float pointSpecificTau(float x, float y, float z) {
     float d2 = tex3D(dtex, x, y, z);
     float d1 = __logf(d2) + __logf(1.e-7);
