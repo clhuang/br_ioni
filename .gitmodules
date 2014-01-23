@@ -1,6 +1,6 @@
 [submodule "bifrost"]
 	path = bifrost
-	url = git@jiba:bifrost.git
+	url = git@github.com:clhuang/bifrost.git
 [submodule "Renderer"]
 	path = Renderer
-	url = git@jiba:Renderer.git
+	url = git@github.com:clhuang/br_renderer.git

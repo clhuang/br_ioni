@@ -12,12 +12,11 @@
 texture<float, 3, cudaReadModeElementType> dtex; // 3D texture
 texture<float, 3, cudaReadModeElementType> eetex; // 3D texture
 texture<float, 2, cudaReadModeElementType> tgtex; // 2D texture
-texture<float, 3, cudaReadModeElementType> uxtex;
-texture<float, 3, cudaReadModeElementType> uytex;
-texture<float, 3, cudaReadModeElementType> uztex; // 3D texture
+texture<float, 3, cudaReadModeElementType> uatex; // velocity along axis of integration
 texture<float, 2, cudaReadModeElementType> atex; // 2D texture
 texture<float, 2, cudaReadModeElementType> entex; // 2D texture
 texture<float, 2, cudaReadModeElementType> katex; // 2D texture
+texture<float, 1, cudaReadModeElementType> xtex; // derivative of integration-axis
 texture<float, 1, cudaReadModeElementType> aptex; // derivative of integration-axis
 
 __constant__ float dmin;
@@ -29,6 +28,9 @@ __constant__ float erange;
 __constant__ float nsteps;
 __constant__ char axis;
 __constant__ bool reverse; //go along axis in reverse direction
+
+__constant__ int projectionXsize;
+__constant__ int projectionYsize;
 
 #define X_AXIS 0
 #define Y_AXIS 1
@@ -50,10 +52,7 @@ __device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly
 
     if (iRenderOnly) return make_float3(en * en * g * ds, 0, 0);
 
-    float uu = 1e4 * (
-            tex3D(uxtex, x, y, z) * viewVector.x +
-            tex3D(uytex, x, y, z) * viewVector.y +
-            tex3D(uztex, x, y, z) * viewVector.z);
+    float uu = 1e4 * (tex3D(uatex, x, y, z) * (reverse ? -1 : 1));
 
     return make_float3(en * en * g * ds, uu, sqrtf(tt));
 }
@@ -83,29 +82,25 @@ extern "C" {
         float target = reverse ? 0 : 1;
 
         switch(axis) {
-            case X_AXIS: cp.y = ypixel / (float) projectionXsize;
-                         cp.z = zpixel / (float) projectionYsize;
+            case X_AXIS: cp.y = xpixel / (float) projectionXsize;
+                         cp.z = ypixel / (float) projectionYsize;
                          ati = &cp.x;
                          break;
-            case Y_AXIS: cp.x = ypixel / (float) projectionXsize;
-                         cp.z = zpixel / (float) projectionYsize;
+            case Y_AXIS: cp.x = xpixel / (float) projectionXsize;
+                         cp.z = ypixel / (float) projectionYsize;
                          ati = &cp.y;
                          break;
-            case Z_AXIS: cp.x = ypixel / (float) projectionXsize;
-                         cp.y = zpixel / (float) projectionYsize;
+            case Z_AXIS: cp.x = xpixel / (float) projectionXsize;
+                         cp.y = ypixel / (float) projectionYsize;
                          ati = &cp.z;
                          break;
             default: return;
         }
-        *ati = 1 - target;
+
+        *ati = 1 - target; //start at either 0 or 1
 
         float emiss = 0;
         float tausum = opacity ? tau[idx] : 0;
-
-        if (currentPosition.x == INFINITY) {
-            out[idx] = 0;
-            return;
-        }
 
         do {
             if (tausum <= 1e2) {
@@ -117,8 +112,8 @@ extern "C" {
                 tausum += pointSpecificTau(cp.x, cp.y, cp.z);
             }
 
-            currentPosition += positionIncrement;
-        } while (isInSlice(currentPosition));
+            *ati += da;
+        } while (reverse ? (*ati > target) : (*ati < target));
 
         if (opacity) tau[idx] = tausum;
         out[idx] = emiss;
@@ -138,22 +133,24 @@ extern "C" {
 
         switch(axis) {
             case X_AXIS: cp.x = 1 - target;
-                         cp.y = ypixel / (float) projectionXsize;
-                         cp.z = zpixel / (float) projectionYsize;
+                         cp.y = xpixel / (float) projectionXsize;
+                         cp.z = ypixel / (float) projectionYsize;
                          ati = &cp.x;
                          break;
             case Y_AXIS: cp.y = 1 - target;
-                         cp.x = ypixel / (float) projectionXsize;
-                         cp.z = zpixel / (float) projectionYsize;
+                         cp.x = xpixel / (float) projectionXsize;
+                         cp.z = ypixel / (float) projectionYsize;
                          ati = &cp.y;
                          break;
             case Z_AXIS: cp.z = 1 - target;
-                         cp.x = ypixel / (float) projectionXsize;
-                         cp.y = zpixel / (float) projectionYsize;
+                         cp.x = xpixel / (float) projectionXsize;
+                         cp.y = ypixel / (float) projectionYsize;
                          ati = &cp.z;
                          break;
             default: return;
         }
+
+        *ati = 1 - target;
 
         float3 pointSpecificData;
 
@@ -168,8 +165,6 @@ extern "C" {
         for (nfreq = 0; nfreq < nlamb; nfreq++) {
             out[idx * nlamb + nfreq] = 0;
         }
-
-        if (currentPosition.x == INFINITY) return;
 
         do {
             if (tausum <= 1e2) {

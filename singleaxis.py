@@ -9,7 +9,9 @@ import pycuda.driver as cuda
 from bifrost import OSC_data
 from bifrost import Rhoeetab
 from bifrost import Opatab
-from Renderer import Renderer
+
+BLOCKSIZE = 256
+MAXGRIDSIZE = 10000000
 
 EE = 1.602189e-12
 HH = 6.626176e-27
@@ -36,15 +38,23 @@ DEFAULT_LOC = os.path.expanduser('~') + '/LockheedData/ionismalldata'
 DEFAULT_PARAMFILE = 'oxygen-II-VII-iris'
 
 
-class SingAxisRenderer(Renderer):
+class SingAxisRenderer(object):
     zcutoff = -1.0  # the point at which we are considered to be no longer in the chromosphere
     locph = prev_lambd = float('nan')
     snap = 0
 
     ux = uy = uz = e = r = oscdata = ka_table = opatab = None
 
-    def __init__(self, cuda_code, data_dir=DEFAULT_LOC, snap=None):
-        Renderer.__init__(self, cuda_code)
+    def __init__(self, cuda_code, xaxis, data_dir=DEFAULT_LOC, snap=None):
+        cuda.init()
+
+        from pycuda.tools import make_default_context
+        global context
+        self.context = make_default_context()
+
+        self.cuda_code = cuda_code
+
+        self.xaxis = xaxis
         self.data_dir = data_dir
         with open(data_dir + '/gpuparam.txt') as gpuparamfile:
             self.template = gpuparamfile.readline().strip() + '%03i'
@@ -66,6 +76,43 @@ class SingAxisRenderer(Renderer):
         self.erange = m.log(self.rhoeetab.params['eimax']) - self.emin
 
         self.set_snap(snap)
+
+    def load_texture(self, name, arr):
+        '''
+        Loads an array into a texture with a name.
+
+        Address by the name in the kernel code.
+        '''
+        tex = self.mod.get_texref(name)  # x*y*z
+        arr = arr.astype('float32')
+
+        if len(arr.shape) == 3:
+            carr = arr.copy('F')
+            texarray = numpy3d_to_array(carr, 'F')
+            tex.set_array(texarray)
+        else:
+            if len(arr.shape) == 1:
+                arr = np.expand_dims(arr, 1)
+            tex.set_flags(0)
+            cuda.matrix_to_texref(arr, tex, order='F')
+
+        tex.set_address_mode(0, cuda.address_mode.CLAMP)
+        tex.set_address_mode(1, cuda.address_mode.CLAMP)
+        tex.set_flags(cuda.TRSF_NORMALIZED_COORDINATES)
+        tex.set_filter_mode(cuda.filter_mode.LINEAR)
+        self.textures[name] = tex
+
+    def load_constant(self, name, val):
+        '''
+        Loads a constant into memory by name in kernel code.
+
+        If val is a float, int, char, etc., it must be wrapped by
+        np.float32() or np.int32() or similar.
+        '''
+        cuda.memcpy_htod(self.mod.get_global(name)[0], val)
+
+    def clear_textures(self):
+        self.textures = {}
 
     def i_rendern(self, channels, axis, reverse, opacity=False):
         '''
@@ -107,6 +154,64 @@ class SingAxisRenderer(Renderer):
         print('Finished rendering channels')
 
         return (out, test_lambdas)
+
+    def render(self, axis, reverse, output_dims, consts, tables, split_tables,
+               spec_render, verbose=True):
+        self.clear_textures()
+        projection_x_size, projection_y_size = output_dims
+
+        for tup in tables:
+            self.load_texture(*tup)
+        for tup in consts:
+            self.load_constant(*tup)
+
+        if verbose:
+            print('Loaded textures, computed emissivities')
+
+        input_shape = self.e.shape
+
+        numsplits = np.ceil(np.product(input_shape) / MAXGRIDSIZE)
+        if axis == 'x':
+            intaxis = self.xaxis
+            intaxis_size = input_shape[0]
+            ax_id = 0
+        if axis == 'y':
+            intaxis = self.yaxis
+            intaxis_size = input_shape[1]
+            ax_id = 1
+        if axis == 'z':
+            intaxis = self.zaxis
+            intaxis_size = input_shape[2]
+            ax_id = 2
+        splitsize = np.ceil(intaxis_size / numsplits)
+
+        self.load_constant('projectionXsize', np.int32(projection_x_size))
+        self.load_constant('projectionYsize', np.int32(projection_y_size))
+
+        #split_tables is tables to split, table_splits is list of split tables
+        table_splits = {name: np.array_split(table, numsplits, ax_id) for name, table in split_tables}
+        table_splits['aptex'] = np.array_split(np.gradient(intaxis), numsplits)
+
+        if reverse:
+            for name in table_splits:
+                table_splits[name].reverse()
+
+        for i in xrange(numsplits):
+            start = i * splitsize
+            if start + splitsize > intaxis_size:
+                splitsize = intaxis_size - start
+
+            if verbose:
+                print('Rendering ' + axis + '-coords ' + str(start) + '-' +
+                      str(start + splitsize) + ' of ' + str(intaxis_size))
+
+            for name, table_split in table_splits:
+                self.load_texture(name, table_split[i])
+
+            data_size = self.projection_x_size * self.projection_y_size
+            grid_size = (data_size + BLOCKSIZE - 1) / BLOCKSIZE
+
+            spec_render(self, BLOCKSIZE, grid_size)
 
     def set_snap(self, snap):
         '''
