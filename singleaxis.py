@@ -5,6 +5,7 @@ from collections import namedtuple
 
 import numpy as np
 import pycuda.driver as cuda
+from pycuda.compiler import SourceModule
 
 from bifrost import OSC_data
 from bifrost import Rhoeetab
@@ -43,9 +44,12 @@ class SingAxisRenderer(object):
     locph = prev_lambd = float('nan')
     snap = 0
 
+    projection_x_size = projection_y_size = 640
+    nsteps = 600
+
     ux = uy = uz = e = r = oscdata = ka_table = opatab = None
 
-    def __init__(self, cuda_code, xaxis, data_dir=DEFAULT_LOC, snap=None):
+    def __init__(self, cuda_code, data_dir=DEFAULT_LOC, snap=None):
         cuda.init()
 
         from pycuda.tools import make_default_context
@@ -54,7 +58,6 @@ class SingAxisRenderer(object):
 
         self.cuda_code = cuda_code
 
-        self.xaxis = xaxis
         self.data_dir = data_dir
         with open(data_dir + '/gpuparam.txt') as gpuparamfile:
             self.template = gpuparamfile.readline().strip() + '%03i'
@@ -63,7 +66,7 @@ class SingAxisRenderer(object):
                 snap = self.snap_range[0]
             gpuparamfile.readline().strip()
             int(gpuparamfile.readline())
-            self.acont_filenames = gpuparamfile.readline().split()
+            self.acont_filenames = ['data/' + i for i in gpuparamfile.readline().split()]
 
         self.rhoeetab = Rhoeetab(fdir=data_dir)
 
@@ -76,6 +79,8 @@ class SingAxisRenderer(object):
         self.erange = m.log(self.rhoeetab.params['eimax']) - self.emin
 
         self.set_snap(snap)
+        self.mod = SourceModule(self.cuda_code, no_extern_c=True,
+                                include_dirs=['/Developer/NVIDIA/CUDA-5.0/samples/common/inc'])
 
     def load_texture(self, name, arr):
         '''
@@ -155,10 +160,9 @@ class SingAxisRenderer(object):
 
         return (out, test_lambdas)
 
-    def render(self, axis, reverse, output_dims, consts, tables, split_tables,
+    def render(self, axis, reverse, consts, tables, split_tables,
                spec_render, verbose=True):
         self.clear_textures()
-        projection_x_size, projection_y_size = output_dims
 
         for tup in tables:
             self.load_texture(*tup)
@@ -170,7 +174,7 @@ class SingAxisRenderer(object):
 
         input_shape = self.e.shape
 
-        numsplits = np.ceil(np.product(input_shape) / MAXGRIDSIZE)
+        numsplits = int(np.product(input_shape, dtype='float32') / MAXGRIDSIZE + 1)
         if axis == 'x':
             intaxis = self.xaxis
             intaxis_size = input_shape[0]
@@ -185,8 +189,11 @@ class SingAxisRenderer(object):
             ax_id = 2
         splitsize = np.ceil(intaxis_size / numsplits)
 
-        self.load_constant('projectionXsize', np.int32(projection_x_size))
-        self.load_constant('projectionYsize', np.int32(projection_y_size))
+        self.load_constant('projectionXsize', np.int32(self.projection_x_size))
+        self.load_constant('projectionYsize', np.int32(self.projection_y_size))
+        self.load_constant('axis', np.uint8(ord(axis)))
+        self.load_constant('reverse', np.int8(reverse))
+        self.load_constant('nsteps', np.int32(self.nsteps))
 
         #split_tables is tables to split, table_splits is list of split tables
         table_splits = {name: np.array_split(table, numsplits, ax_id) for name, table in split_tables}
@@ -205,7 +212,7 @@ class SingAxisRenderer(object):
                 print('Rendering ' + axis + '-coords ' + str(start) + '-' +
                       str(start + splitsize) + ' of ' + str(intaxis_size))
 
-            for name, table_split in table_splits:
+            for name, table_split in table_splits.items():
                 self.load_texture(name, table_split[i])
 
             data_size = self.projection_x_size * self.projection_y_size
@@ -225,7 +232,13 @@ class SingAxisRenderer(object):
 
         self.oscdata = OSC_data(snap, self.template, fdir=self.data_dir)
         if (self.locph != self.locph):  # axes not loaded yet
-            self.update_axes(self.zcutoff)
+            self.xaxis = self.oscdata.getvar('x').astype('float32')
+            self.yaxis = self.oscdata.getvar('y').astype('float32')
+            self.zaxis = self.oscdata.getvar('z').astype('float32')
+            for i, val in enumerate(self.zaxis):
+                if val > self.zcutoff:
+                    self.locph = i
+                    break
 
         self.ux = self.oscdata.getvar('ux')[..., :self.locph]
         self.uy = self.oscdata.getvar('uy')[..., :self.locph]
@@ -272,7 +285,7 @@ class SAStaticEmRenderer(SingAxisRenderer):
             self.awgt.append(mem[self.ntgbin * self.nedbin])
         self.acont_tables = np.array(self.acont_tables)
 
-    def i_render(self, channel, axis, reverse, tau=None, opacity=False, verbose=True, fw=None):
+    def i_render(self, channel, axis, reverse=False, tau=None, opacity=False, verbose=True, fw=None):
         '''
         Calculates the total intensity of light from a particular POV.
 

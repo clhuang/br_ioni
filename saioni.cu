@@ -1,5 +1,3 @@
-#include "renderer.cuh"
-
 #define MP 1.67e-27
 #define KB 1.38e-23
 #define CC 3.00e8
@@ -25,18 +23,24 @@ __constant__ float drange;
 __constant__ float emin;
 __constant__ float erange;
 
-__constant__ float nsteps;
+__constant__ float enmin;
+__constant__ float enrange;
+
+__constant__ float tgmin;
+__constant__ float tgrange;
+
+__constant__ int nsteps;
 __constant__ char axis;
 __constant__ bool reverse; //go along axis in reverse direction
 
 __constant__ int projectionXsize;
 __constant__ int projectionYsize;
 
-#define X_AXIS 0
-#define Y_AXIS 1
-#define Z_AXIS 2
+#define X_AXIS 120
+#define Y_AXIS 121
+#define Z_AXIS 122
 
-__device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly) {
+__device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly, float distalongax) {
     float d1 = __logf(tex3D(dtex, x, y, z)) + __logf(1.e-7);
     float e1 = __logf(tex3D(eetex, x, y, z)) - d1 + __logf(1.e5);
     float dd = (d1 - dmin) / drange; //density, energy lookup values
@@ -48,7 +52,7 @@ __device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly
     float tti = (__log10f(tt) - tgmin) / tgrange;
 
     float g = tex2D(atex, edi, tti); //lookup g
-    float ds = tex1D(aptex);
+    float ds = tex1D(aptex, distalongax);
 
     if (iRenderOnly) return make_float3(en * en * g * ds, 0, 0);
 
@@ -57,14 +61,14 @@ __device__ float3 pointSpecificStuff(float x, float y, float z, bool iRenderOnly
     return make_float3(en * en * g * ds, uu, sqrtf(tt));
 }
 
-__device__ float pointSpecificTau(float x, float y, float z) {
+__device__ float pointSpecificTau(float x, float y, float z, float distalongax) {
     float d2 = tex3D(dtex, x, y, z);
     float d1 = __logf(d2) + __logf(1.e-7);
     float e1 = __logf(tex3D(eetex, x, y, z)) - d1 + __logf(1.e5);
     float dd = (d1 - dmin) / drange; //density, energy lookup values
     float ee = (e1 - emin) / erange;
     float kk = tex2D(katex, ee, dd);
-    float ds = tex1D(aptex);
+    float ds = tex1D(aptex, distalongax);
 
     return (kk * d2 * ds) / GRPH;
 }
@@ -104,12 +108,12 @@ extern "C" {
 
         do {
             if (tausum <= 1e2) {
-                emiss += pointSpecificStuff(cp.x, cp.y, cp.z, true).x *
+                emiss += pointSpecificStuff(cp.x, cp.y, cp.z, true, *ati).x *
                     expf(-tausum);
             }
 
             if (opacity) {
-                tausum += pointSpecificTau(cp.x, cp.y, cp.z);
+                tausum += pointSpecificTau(cp.x, cp.y, cp.z, *ati);
             }
 
             *ati += da;
@@ -169,7 +173,7 @@ extern "C" {
         do {
             if (tausum <= 1e2) {
                 pointSpecificData = pointSpecificStuff(
-                        cp.x, cp.y, cp.z, false);
+                        cp.x, cp.y, cp.z, false, *ati);
 
                 dopp_width = pointSpecificData.z * dopp_width0;
 
@@ -186,7 +190,7 @@ extern "C" {
             }
 
             if (opacity) {
-                tausum += pointSpecificTau(cp.x, cp.y, cp.z);
+                tausum += pointSpecificTau(cp.x, cp.y, cp.z, *ati);
             }
 
             *ati += da;
