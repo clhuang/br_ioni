@@ -5,11 +5,12 @@ from collections import namedtuple
 
 import numpy as np
 import pycuda.driver as cuda
-from pycuda.compiler import SourceModule
 
 from bifrost import OSC_data
 from bifrost import Rhoeetab
 from bifrost import Opatab
+
+from Renderer import SingAxisRenderer
 
 BLOCKSIZE = 256
 MAXGRIDSIZE = 10000000
@@ -39,24 +40,9 @@ DEFAULT_LOC = os.path.expanduser('~') + '/LockheedData/ionismalldata'
 DEFAULT_PARAMFILE = 'oxygen-II-VII-iris'
 
 
-class SingAxisRenderer(object):
-    zcutoff = -1.0  # the point at which we are considered to be no longer in the chromosphere
-    locph = prev_lambd = float('nan')
-    snap = 0
-
-    projection_x_size = projection_y_size = 640
-    nsteps = 600
-
-    ux = uy = uz = e = r = oscdata = ka_table = opatab = None
-
+class SAEmissivityRenderer(SingAxisRenderer):
     def __init__(self, cuda_code, data_dir=DEFAULT_LOC, snap=None):
-        cuda.init()
-
-        from pycuda.tools import make_default_context
-        global context
-        self.context = make_default_context()
-
-        self.cuda_code = cuda_code
+        super(SAEmissivityRenderer, self).__init__(cuda_code)
 
         self.data_dir = data_dir
         with open(data_dir + '/gpuparam.txt') as gpuparamfile:
@@ -79,45 +65,6 @@ class SingAxisRenderer(object):
         self.erange = m.log(self.rhoeetab.params['eimax']) - self.emin
 
         self.set_snap(snap)
-        self.mod = SourceModule(self.cuda_code, no_extern_c=True,
-                                include_dirs=['/Developer/NVIDIA/CUDA-5.0/samples/common/inc'])
-
-    def load_texture(self, name, arr):
-        '''
-        Loads an array into a texture with a name.
-
-        Address by the name in the kernel code.
-        '''
-        tex = self.mod.get_texref(name)  # x*y*z
-        arr = arr.astype('float32')
-
-        if len(arr.shape) == 3:
-            carr = arr.copy('F')
-            texarray = numpy3d_to_array(carr, 'F')
-            tex.set_array(texarray)
-        else:
-            if len(arr.shape) == 1:
-                arr = np.expand_dims(arr, 1)
-            tex.set_flags(0)
-            cuda.matrix_to_texref(arr, tex, order='F')
-
-        tex.set_address_mode(0, cuda.address_mode.CLAMP)
-        tex.set_address_mode(1, cuda.address_mode.CLAMP)
-        tex.set_flags(cuda.TRSF_NORMALIZED_COORDINATES)
-        tex.set_filter_mode(cuda.filter_mode.LINEAR)
-        self.textures[name] = tex
-
-    def load_constant(self, name, val):
-        '''
-        Loads a constant into memory by name in kernel code.
-
-        If val is a float, int, char, etc., it must be wrapped by
-        np.float32() or np.int32() or similar.
-        '''
-        cuda.memcpy_htod(self.mod.get_global(name)[0], val)
-
-    def clear_textures(self):
-        self.textures = {}
 
     def i_rendern(self, channels, axis, reverse, opacity=False):
         '''
@@ -160,66 +107,6 @@ class SingAxisRenderer(object):
 
         return (out, test_lambdas)
 
-    def render(self, axis, reverse, consts, tables, split_tables,
-               spec_render, verbose=True):
-        self.clear_textures()
-
-        for tup in tables:
-            self.load_texture(*tup)
-        for tup in consts:
-            self.load_constant(*tup)
-
-        if verbose:
-            print('Loaded textures, computed emissivities')
-
-        input_shape = self.e.shape
-
-        numsplits = int(np.product(input_shape, dtype='float32') / MAXGRIDSIZE + 1)
-        if axis == 'x':
-            intaxis = self.xaxis
-            intaxis_size = input_shape[0]
-            ax_id = 0
-        if axis == 'y':
-            intaxis = self.yaxis
-            intaxis_size = input_shape[1]
-            ax_id = 1
-        if axis == 'z':
-            intaxis = self.zaxis
-            intaxis_size = input_shape[2]
-            ax_id = 2
-        splitsize = np.ceil(intaxis_size / numsplits)
-
-        self.load_constant('projectionXsize', np.int32(self.projection_x_size))
-        self.load_constant('projectionYsize', np.int32(self.projection_y_size))
-        self.load_constant('axis', np.uint8(ord(axis)))
-        self.load_constant('reverse', np.int8(reverse))
-        self.load_constant('nsteps', np.int32(self.nsteps))
-
-        #split_tables is tables to split, table_splits is list of split tables
-        table_splits = {name: np.array_split(table, numsplits, ax_id) for name, table in split_tables}
-        table_splits['aptex'] = np.array_split(np.gradient(intaxis), numsplits)
-
-        if reverse:
-            for name in table_splits:
-                table_splits[name].reverse()
-
-        for i in xrange(numsplits):
-            start = i * splitsize
-            if start + splitsize > intaxis_size:
-                splitsize = intaxis_size - start
-
-            if verbose:
-                print('Rendering ' + axis + '-coords ' + str(start) + '-' +
-                      str(start + splitsize) + ' of ' + str(intaxis_size))
-
-            for name, table_split in table_splits.items():
-                self.load_texture(name, table_split[i])
-
-            data_size = self.projection_x_size * self.projection_y_size
-            grid_size = (data_size + BLOCKSIZE - 1) / BLOCKSIZE
-
-            spec_render(self, BLOCKSIZE, grid_size)
-
     def set_snap(self, snap):
         '''
         Sets the timestamp with which to view the data.
@@ -246,8 +133,42 @@ class SingAxisRenderer(object):
         self.e = self.oscdata.getvar('e')[..., :self.locph]
         self.r = self.oscdata.getvar('r')[..., :self.locph]
 
+    def i_render(self, channel, azimuth, altitude, tau=None, opacity=False, verbose=True, fw=None):
+        '''
+        Calculates the total intensity of light from a particular POV.
 
-class SAStaticEmRenderer(SingAxisRenderer):
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        fw allows setting a different wavelength for opacity calculations
+        '''
+
+    def il_render(self, channel, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
+                  tau=None, opacity=False, dnus=None, verbose=True, fw=None):
+        '''
+        Calculates intensities as a function of frequency.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        nlamb indicates number of frequencies to sample,
+        dopp_width_range indicates the range of frequencies to sample
+        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
+
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        Returns a tuple of:
+            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
+            Array of nlamb, containing the deviation from nu_0 for each index in the first table
+        Uses dnus if specified (list of deviations from the center frequency)
+        Otherwise generates test_lambdas using nlamb and dopp_width_range
+        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
+        '''
+
+
+class SAStaticEmRenderer(SAEmissivityRenderer):
     '''
     Class for rendering emissions of a slice of the sun
     using temperature/density table lookup, assuming static
@@ -286,16 +207,6 @@ class SAStaticEmRenderer(SingAxisRenderer):
         self.acont_tables = np.array(self.acont_tables)
 
     def i_render(self, channel, axis, reverse=False, tau=None, opacity=False, verbose=True, fw=None):
-        '''
-        Calculates the total intensity of light from a particular POV.
-
-        Channel indicates which emission spectra to look at.
-        axis, reverse indicate POV.
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        fw allows setting a different wavelength for opacity calculations
-        '''
         tables = [('atex', self.acont_tables[channel]),
                   ('entex', self.ne_table),
                   ('tgtex', self.tg_table)]
@@ -344,25 +255,6 @@ class SAStaticEmRenderer(SingAxisRenderer):
 
     def il_render(self, channel, axis, reverse, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
-        '''
-        Calculates intensities as a function of frequency.
-
-        Channel indicates which emission spectra to look at.
-        axis, reverse indicate POV.
-        nlamb indicates number of frequencies to sample,
-        dopp_width_range indicates the range of frequencies to sample
-        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
-
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        Returns a tuple of:
-            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
-            Array of nlamb, containing the deviation from nu_0 for each index in the first table
-        Uses dnus if specified (list of deviations from the center frequency)
-        Otherwise generates test_lambdas using nlamb and dopp_width_range
-        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
-        '''
         dopp_width0 = self.ny0[channel] / CC * 1e2 * m.sqrt(2 * KB / self.awgt[channel] / MP)
 
         dny = dopp_width_range * 1.0 / nlamb * dopp_width0 * m.sqrt(TEMAX)
@@ -392,9 +284,7 @@ class SAStaticEmRenderer(SingAxisRenderer):
 
         split_tables = [('dtex', self.r),
                         ('eetex', self.e),
-                        ('uxtex', self.ux),
-                        ('uytex', self.uy),
-                        ('uztex', self.uz)]
+                        ('uatex', self.ux if axis == 'x' else self.uy if axis == 'y' else self.uz)]
 
         if not opacity or tau is None:
             tau = np.zeros((self.projection_y_size, self.projection_x_size), dtype='float32')
@@ -424,9 +314,6 @@ class SAStaticEmRenderer(SingAxisRenderer):
             return (ilspec_render.datout, dnus, tau)
         return (ilspec_render.datout, dnus)
 
-    def channellist(self):
-        return self.acont_filenames
-
     def set_lambd(self, lambd):
         if self.opatab is None:
             self.opatab = Opatab(fdir=self.data_dir)
@@ -437,7 +324,7 @@ class SAStaticEmRenderer(SingAxisRenderer):
             self.ka_table = self.opatab.h_he_absorb(lambd)
 
 
-class SATDIEmRenderer(SingAxisRenderer):
+class SATDIEmRenderer(SAEmissivityRenderer):
     '''
     Class for rendering emissions of a slice of the sun
     using calculated ion densities.
@@ -452,17 +339,6 @@ class SATDIEmRenderer(SingAxisRenderer):
         If snap is none, picks the earliest snap specified by gpuparam.txt.
         '''
         super(SATDIEmRenderer, self).__init__(TDICUDACODE, data_dir=data_dir)
-
-        rhoeetab = Rhoeetab(fdir=data_dir)
-
-        self.nrhobin = rhoeetab.params['nrhobin']
-        self.dmin = m.log(rhoeetab.params['rhomin'])
-        self.drange = m.log(rhoeetab.params['rhomax']) - self.dmin
-        self.tg_table = rhoeetab.get_table('tg')
-
-        self.neibin = rhoeetab.params['neibin']
-        self.emin = m.log(rhoeetab.params['eimin'])
-        self.erange = m.log(rhoeetab.params['eimax']) - self.emin
 
         irisfile = open(data_dir + '/' + paramfile)
         data = [line for line in irisfile.readlines() if line[0] != '*']
@@ -498,16 +374,6 @@ class SATDIEmRenderer(SingAxisRenderer):
             self.trns.append(Trn(irad, jrad, alamb, a_ul, f))
 
     def i_render(self, level, axis, reverse, tau=None, opacity=False, verbose=True, fw=None):
-        '''
-        Calculates the total intensity of light from a particular POV.
-
-        Level indicates what emission spectra to look at.
-        axis, reverse indicate POV.
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        fw allows setting a different wavelength for opacity calculations
-        '''
         if level != self.level:
             self.em = self.get_emissivities(level)
             self.level = level
@@ -525,8 +391,7 @@ class SATDIEmRenderer(SingAxisRenderer):
             consts.extend([('dmin', np.float32(self.dmin)),
                            ('drange', np.float32(self.drange)),
                            ('emin', np.float32(self.emin)),
-                           ('erange', np.float32(self.erange)),
-                           ('axis', np.int8(ord(axis.lower()) - ord('x')))])
+                           ('erange', np.float32(self.erange))])
 
         if not opacity or tau is None:
             tau = np.zeros((self.projection_y_size, self.projection_x_size), dtype='float32')
@@ -553,25 +418,6 @@ class SATDIEmRenderer(SingAxisRenderer):
 
     def il_render(self, level, axis, reverse, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
-        '''
-        Calculates intensities as a function of frequency.
-
-        Level indicates what emission spectra to look at.
-        axis, reverse indicate POV.
-        nlamb indicates number of frequencies to sample,
-        dopp_width_range indicates the range of frequencies to sample
-        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
-
-        If opacity is True, then looks at tau to see what the
-        current opacity is (tau can be left as None to have no initial opacity)
-
-        Returns a tuple of:
-            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
-            Array of nlamb, containing the deviation from nu_0 for each index in the first table
-        Uses dnus if specified (list of deviations from the center frequency)
-        Otherwise generates test_lambdas using nlamb and dopp_width_range
-        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
-        '''
         if level != self.level:
             self.em = self.get_emissivities(level)
             self.level = level
@@ -593,9 +439,7 @@ class SATDIEmRenderer(SingAxisRenderer):
                   ('erange', np.float32(self.erange))]
         tables = [('tgtex', self.tg_table)]
         split_tables = [('emtex', self.em),
-                        ('uztex', self.uz),
-                        ('uytex', self.uy),
-                        ('uxtex', self.ux),
+                        ('uatex', self.ux if axis == 'x' else self.uy if axis == 'y' else self.uz),
                         ('eetex', self.e),
                         ('dtex', self.r)]
 
@@ -656,9 +500,6 @@ class SATDIEmRenderer(SingAxisRenderer):
         ion_densities = self.oscdata.getooevar(tline.jrad)
         return ((HH * CC * 1e-2 / (tline.alamb * 1e-10) * tline.a_ul / (4 * m.pi)) * ion_densities)[..., :self.locph]
 
-    def channellist(self):
-        return [self.egis[t.irad].label + " -->" + self.egis[t.jrad].label for t in self.trns]
-
     def set_lambd(self, lambd):
         if self.opatab is None:
             self.opatab = Opatab(fdir=self.data_dir)
@@ -667,42 +508,3 @@ class SATDIEmRenderer(SingAxisRenderer):
         if lambd != self.prev_lambd:
             self.prev_lambd = lambd
             self.ka_table = self.opatab.h_he_absorb(lambd)
-
-
-def numpy3d_to_array(np_array, order=None):
-    '''
-    Method for copying a numpy array to a CUDA array
-
-    If you get a buffer error, run this method on np_array.copy('F')
-    '''
-    from pycuda.driver import Array, ArrayDescriptor3D, Memcpy3D, dtype_to_array_format
-    if order is None:
-        order = 'C' if np_array.strides[0] > np_array.strides[2] else 'F'
-
-    if order.upper() == 'C':
-        d, h, w = np_array.shape
-    elif order.upper() == "F":
-        w, h, d = np_array.shape
-    else:
-        raise Exception("order must be either F or C")
-
-    descr = ArrayDescriptor3D()
-    descr.width = w
-    descr.height = h
-    descr.depth = d
-    descr.format = dtype_to_array_format(np_array.dtype)
-    descr.num_channels = 1
-    descr.flags = 0
-
-    device_array = Array(descr)
-
-    copy = Memcpy3D()
-    copy.set_src_host(np_array)
-    copy.set_dst_array(device_array)
-    copy.width_in_bytes = copy.src_pitch = np_array.strides[1]
-    copy.src_height = copy.height = h
-    copy.depth = d
-
-    copy()
-
-    return device_array
