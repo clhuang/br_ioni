@@ -43,6 +43,14 @@ class EmissivityRenderer(Renderer):
 
     def __init__(self, cuda_code, snaprange, acont_filenames,
                  name_template, data_dir=DEFAULT_LOC, snap=None):
+        '''
+        Creates an emissivity renderer.
+        cuda_code is the string representation of the cuda kernel.
+        Snaprange is the range of allowable snaps, represented as a tuple, e.g. (100, 199).
+        acont_filenames is the location of the CHIANTI tables.
+        name_template is the base name of the snap/aux files, e.g. qsmag_by00it%03
+        (where %03 is a placeholder for the snap number).
+        '''
         Renderer.__init__(self, cuda_code)
         self.data_dir = data_dir
         self.template = name_template
@@ -77,6 +85,7 @@ class EmissivityRenderer(Renderer):
 
         fw allows setting a different wavelength for opacity calculations
         '''
+        raise NotImplementedError('EmissivityRenderer does not define i/il_render, needs to be overridden')
 
     def il_render(self, channel, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
@@ -99,6 +108,7 @@ class EmissivityRenderer(Renderer):
         Otherwise generates test_lambdas using nlamb and dopp_width_range
         dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
         '''
+        raise NotImplementedError('EmissivityRenderer does not define i/il_render, needs to be overridden')
 
     def i_rendern(self, channels, azimuth, altitude, opacity=False):
         '''
@@ -241,6 +251,7 @@ class StaticEmRenderer(EmissivityRenderer):
                  name_template, data_dir=DEFAULT_LOC, snap=None):
         '''
         Initializes renderer, and loads data from a directory.
+        Specify the allowable range of snaps as a tuple, e.g. (100, 199).
         If snap is none, picks the earliest snap specified by gpuparam.txt.
         '''
         super(StaticEmRenderer, self).__init__(SERCUDACODE, snaprange, acont_filenames,
@@ -258,6 +269,16 @@ class StaticEmRenderer(EmissivityRenderer):
         self.acont_tables = np.array(self.acont_tables)
 
     def i_render(self, channel, azimuth, altitude, tau=None, opacity=False, verbose=True, fw=None):
+        '''
+        Calculates the total intensity of light from a particular POV.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        fw allows setting a different wavelength for opacity calculations
+        '''
         tables = [('atex', self.acont_tables[channel]),
                   ('entex', self.ne_table),
                   ('tgtex', self.tg_table)]
@@ -306,6 +327,25 @@ class StaticEmRenderer(EmissivityRenderer):
 
     def il_render(self, channel, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
+        '''
+        Calculates intensities as a function of frequency.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        nlamb indicates number of frequencies to sample,
+        dopp_width_range indicates the range of frequencies to sample
+        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
+
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        Returns a tuple of:
+            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
+            Array of nlamb, containing the deviation from nu_0 for each index in the first table
+        Uses dnus if specified (list of deviations from the center frequency)
+        Otherwise generates test_lambdas using nlamb and dopp_width_range
+        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
+        '''
         dopp_width0 = self.ny0[channel] / CC * 1e2 * m.sqrt(2 * KB / self.awgt[channel] / MP)
 
         dny = dopp_width_range * 1.0 / nlamb * dopp_width0 * m.sqrt(TEMAX)
@@ -371,6 +411,9 @@ class StaticEmRenderer(EmissivityRenderer):
         return self.acont_filenames
 
     def set_lambd(self, lambd):
+        '''
+        Set wavelength for calculating opacity.
+        '''
         if self.opatab is None:
             self.opatab = Opatab(fdir=self.data_dir)
         if lambd is None:
@@ -434,6 +477,16 @@ class TDIEmRenderer(EmissivityRenderer):
             self.trns.append(Trn(irad, jrad, alamb, a_ul, f))
 
     def i_render(self, level, azimuth, altitude, tau=None, opacity=False, verbose=True, fw=None):
+        '''
+        Calculates the total intensity of light from a particular POV.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        fw allows setting a different wavelength for opacity calculations
+        '''
         if level != self.level:
             self.em = self.get_emissivities(level)
             self.level = level
@@ -477,6 +530,25 @@ class TDIEmRenderer(EmissivityRenderer):
 
     def il_render(self, level, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
+        '''
+        Calculates intensities as a function of frequency.
+
+        Channel indicates which emission spectra to look at.
+        Azimuth, altitude indicate POV.
+        nlamb indicates number of frequencies to sample,
+        dopp_width_range indicates the range of frequencies to sample
+        range is (std. deviation of doppler broadening at 100,000K) * dopp_width_range
+
+        If opacity is True, then looks at tau to see what the
+        current opacity is (tau can be left as None to have no initial opacity)
+
+        Returns a tuple of:
+            Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
+            Array of nlamb, containing the deviation from nu_0 for each index in the first table
+        Uses dnus if specified (list of deviations from the center frequency)
+        Otherwise generates test_lambdas using nlamb and dopp_width_range
+        dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
+        '''
         if level != self.level:
             self.em = self.get_emissivities(level)
             self.level = level
@@ -565,6 +637,9 @@ class TDIEmRenderer(EmissivityRenderer):
         return [self.egis[t.irad].label + " -->" + self.egis[t.jrad].label for t in self.trns]
 
     def set_lambd(self, lambd):
+        '''
+        Set wavelength for calculating opacity.
+        '''
         if self.opatab is None:
             self.opatab = Opatab(fdir=self.data_dir)
         if lambd is None:
@@ -576,6 +651,10 @@ class TDIEmRenderer(EmissivityRenderer):
 
 def mult_render(self, renderer, sdomain, edomain, step=1, lambd=None, channel=0, il_render=False,
                 opacity=True, curvature=False, fw=None, along_x=True):
+    '''
+    Uses a renderer to render a domain multiple times, and stack it on top of itself repeatedly.
+    [sdomain, edomain] is the range of timestamps to use
+    '''
     tau = None
     emiss = 0
     altitude = 0
