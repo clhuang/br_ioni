@@ -44,7 +44,7 @@ if __name__ == "__main__":
     acont_filenames = [os.path.relpath(i, data_dir) for i in glob.glob(data_dir + '/data/*.dat')]
 
 #and render
-    from br_ioni.Renderer import RenderGUI
+    from br_ioni import RenderGUI
     if args.rendtype == 'tdi':
         from br_ioni import TDIEmRenderer
 #prompt for time-dependent parameter file if necessary
