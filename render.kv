@@ -1,0 +1,159 @@
+#:kivy 1.8.0
+#:import label kivy.uix.label
+#:import la kivy.adapters.listadapter
+#:import lv kivy.uix.listview
+#:import tkfd tkFileDialog
+
+
+<SaveRangeDialog>:
+    slider_snapmin: slider_snapmin
+    slider_snapmax: slider_snapmax
+    slider_snapskip: slider_snapskip
+    channelselect: channelselect
+    auto_dismiss: True
+    savefilename: savefilename
+    FloatLayout:
+        BoxLayout:
+            id: b1
+            orientation: 'vertical'
+            pos_hint: {'x': 0, 'y': 0.3}
+            size_hint: (0.5, 0.7)
+            padding: (0, 10)
+            Label:
+                text: 'Snap bounds: ' + str(sorted((int(slider_snapmin.value), int(slider_snapmax.value))))
+                halign: 'center'
+                text_size: (b1.width - 20, None)
+            Slider:
+                id: slider_snapmin
+                padding: 20
+                min: root.snap_range[0]
+                max: root.snap_range[1]
+                value: root.snap_range[0]
+            Slider:
+                id: slider_snapmax
+                padding: 20
+                step: 1
+                min: root.snap_range[0]
+                max: root.snap_range[1]
+                value: root.snap_range[1]
+            Label:
+                text: ('Render every: ' + str(int(slider_snapskip.value)))
+                halign: 'center'
+                text_size: (b1.width - 20, None)
+            Slider:
+                id: slider_snapskip
+                padding: 20
+                min: 1
+                max: 20
+                value: 1
+            Label:
+                text: 'Output file format string (add "${chan}" for channel, "${num}" for snap #)'
+                halign: 'center'
+                text_size: (b1.width - 20, None)
+            BoxLayout:
+                orientation: 'horizontal'
+                TextInput:
+                    id: savefilename
+                    size_hint: (0.8, None)
+                    height: self.line_height + 15
+                    multiline: False
+                Button:
+                    id: browse
+                    text: 'Browse'
+                    size_hint: (0.2, None)
+                    height: savefilename.height
+                    on_press: setattr(savefilename, 'text', tkfd.asksaveasfilename())
+        ListView:
+            id: channelselect
+            pos_hint: {'x': 0.5, 'y': 0.3}
+            size_hint: (0.5, 0.7)
+            adapter:
+                la.ListAdapter(
+                data=root.channellist,
+                cls=lv.ListItemButton,
+                selection_mode='multiple',
+                allow_empty_selection=False)
+        BoxLayout:
+            orientation: 'horizontal'
+            pos_hint: {'x': 0, 'y': 0}
+            size_hint: (1, 0.3)
+            Button:
+                text: 'Save Images'
+                on_press: root.render_widget._renderrangefromdialog(root, 'i')
+            Button:
+                text: 'Save Spectra'
+                on_press: root.render_widget._renderrangefromdialog(root, 'il')
+
+<ErrorDialog>
+    title: 'Error'
+    errortext: ''
+    size_hint: (0.3, 0.3)
+    FloatLayout:
+        Label:
+            size_hint: (1, 0.7)
+            pos_hint: {'x': 0, 'y': 0.3}
+            text: root.errortext
+            text_size: (root.width - 30, None)
+            halign: 'center'
+        Button:
+            size_hint: (0.4, 0.3)
+            pos_hint: {'x': 0.3, 'y': 0}
+            text: 'Close'
+            on_press: root.dismiss()
+
+<RenderGUI>:
+    s: settings
+
+    canvas:
+        Rectangle:
+            id: bg_rect
+            pos: (0,0)
+            texture: root.texture
+            size: root.texture_size
+
+    GridLayout:
+        cols: 5
+        rows: 1
+        col_default_width: 95
+        row_default_height: 30
+        row_force_default: True
+        spacing: [5, 5]
+        pos: (10, root.height - 110)
+
+        ToggleButton:
+            id: showhelp
+            text: 'Hide help' if self.state == 'down' else 'Show help'
+
+        Button:
+            id: showsettings
+            text: 'Show Settings'
+            on_press: setattr(settings, 'x', 0)
+
+        Button:
+            id: saveimage
+            text: 'Save Image'
+            on_press: root.save_image()
+
+        Button:
+            id: savespectra
+            text: 'Save Spectra'
+            on_press: root.save_spectra()
+
+        Button:
+            id: savemultiple
+            text: 'Save Range'
+            on_press: root.save_range()
+
+    Label:
+        font_size: 15
+        center_x: 110
+        top: root.height - 70
+        valign: 'top'
+        text: root.helptext if showhelp.state == 'down' else ""
+
+    SettingsWithSpinner:
+        id: settings
+        size: (300, 0)
+        x: -800
+        on_config_change: root._settings_change(args[2], args[3], args[4])
+        on_close: setattr(self, 'x', -800)

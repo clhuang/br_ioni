@@ -104,6 +104,8 @@ class EmissivityRenderer(Renderer):
         Returns a tuple of:
             Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
             Array of nlamb, containing the deviation from nu_0 for each index in the first table
+            ny0
+            Array of ysteps*xsteps representing the integrated opacity
         Uses dnus if specified (list of deviations from the center frequency)
         Otherwise generates test_lambdas using nlamb and dopp_width_range
         dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
@@ -278,6 +280,8 @@ class StaticEmRenderer(EmissivityRenderer):
         current opacity is (tau can be left as None to have no initial opacity)
 
         fw allows setting a different wavelength for opacity calculations
+        Returns a tuple of an array representing intensities, and an array representing
+        the integrated opacity
         '''
         tables = [('atex', self.acont_tables[channel]),
                   ('entex', self.ne_table),
@@ -321,9 +325,7 @@ class StaticEmRenderer(EmissivityRenderer):
 
         self.render(azimuth, altitude, consts, tables, split_tables, ispec_render, verbose)
 
-        if opacity:
-            return (ispec_render.datout, tau)
-        return ispec_render.datout
+        return (ispec_render.datout, tau)
 
     def il_render(self, channel, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
@@ -342,6 +344,8 @@ class StaticEmRenderer(EmissivityRenderer):
         Returns a tuple of:
             Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
             Array of nlamb, containing the deviation from nu_0 for each index in the first table
+            nu_0
+            Array of ysteps*xsteps containing integrated opacity
         Uses dnus if specified (list of deviations from the center frequency)
         Otherwise generates test_lambdas using nlamb and dopp_width_range
         dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
@@ -403,9 +407,7 @@ class StaticEmRenderer(EmissivityRenderer):
 
         self.render(azimuth, altitude, consts, tables, split_tables, ilspec_render, verbose)
 
-        if opacity:
-            return (ilspec_render.datout, dnus, tau)
-        return (ilspec_render.datout, dnus)
+        return (ilspec_render.datout, dnus, self.ny0[channel], tau)
 
     def channellist(self):
         return self.acont_filenames
@@ -486,6 +488,8 @@ class TDIEmRenderer(EmissivityRenderer):
         current opacity is (tau can be left as None to have no initial opacity)
 
         fw allows setting a different wavelength for opacity calculations
+        Returns a tuple of an array representing intensities, and an array representing
+        the integrated opacity
         '''
         if level != self.level:
             self.em = self.get_emissivities(level)
@@ -524,9 +528,7 @@ class TDIEmRenderer(EmissivityRenderer):
         ispec_render.datout = np.zeros_like(tempout)
 
         self.render(azimuth, altitude, consts, tables, split_tables, ispec_render, verbose)
-        if opacity:
-            return (ispec_render.datout, tau)
-        return ispec_render.datout
+        return (ispec_render.datout, tau)
 
     def il_render(self, level, azimuth, altitude, nlamb=121, dopp_width_range=1e1,
                   tau=None, opacity=False, dnus=None, verbose=True, fw=None):
@@ -545,6 +547,8 @@ class TDIEmRenderer(EmissivityRenderer):
         Returns a tuple of:
             Array of nlamb*ysteps*xsteps, (or some combination of x, y, zsteps) containing intensity data
             Array of nlamb, containing the deviation from nu_0 for each index in the first table
+            nu_0
+            Array of ysteps*xsteps containing integrated opacity
         Uses dnus if specified (list of deviations from the center frequency)
         Otherwise generates test_lambdas using nlamb and dopp_width_range
         dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
@@ -601,9 +605,7 @@ class TDIEmRenderer(EmissivityRenderer):
         ilspec_render.datout = np.zeros_like(tempout)
 
         self.render(azimuth, altitude, consts, tables, split_tables, ilspec_render, verbose)
-        if opacity:
-            return (ilspec_render.datout, dnus, tau)
-        return (ilspec_render.datout, dnus)
+        return (ilspec_render.datout, dnus, ny0, tau)
 
     def get_emissivities(self, level=None):
         '''
