@@ -21,9 +21,11 @@ Tk().withdraw()
 
 BUF_DIMENSIONS = (3840, 2160)  # supports up to 4k screens
 
-MODE_INTENSITY = 0
-MODE_DOPPSHIFT = 1
-MODE_WIDTH = 2
+
+class Mode(object):
+    intensity = 'Intensity'
+    doppler_shift = 'Doppler Shift'
+    width = 'FWHM'
 
 
 class RenderGUI(Widget):
@@ -38,8 +40,9 @@ class RenderGUI(Widget):
     channel = NumericProperty(0)
     log_offset = NumericProperty(6)
     snap = NumericProperty(0)
-    mode = MODE_INTENSITY
+    mode = Mode.intensity
     spect_analyzer = spectAnlys.Analyzer()
+    nlamb = NumericProperty(41)
 
     helptext = ('Pan l/r: a/d\n'
                 'Tilt u/d: w/s\n'
@@ -70,7 +73,8 @@ class RenderGUI(Widget):
 
         self.config = ConfigParser()
         self.channellist = [os.path.basename(os.path.splitext(a)[0]) for a in self.rend.channellist()]
-        self.config.setdefaults('renderer', {'channel': self.channellist[0],
+        self.config.setdefaults('renderer', {'rendermode': Mode.intensity,
+                                             'channel': self.channellist[0],
                                              'snap': self.rend.snap,
                                              'opacity': 0,
                                              'altitude': self.altitude,
@@ -79,6 +83,15 @@ class RenderGUI(Widget):
                                              'log_offset': self.log_offset,
                                              'stepsize': self.stepsize})
         self.spanel = SettingsPanel(settings=self.s, title='Render Settings', config=self.config)
+
+        self.mode_opt = SettingOptions(title='Render Mode',
+                                       desc='What to simulate and display',
+                                       key='rendermode',
+                                       section='renderer',
+                                       options=[Mode.__dict__[x] for x in dir(Mode) if not x.startswith('_')],
+                                       panel=self.spanel)
+        self.spanel.add_widget(self.mode_opt)
+
         self.chan_opt = SettingOptions(title='Channel',
                                        desc='Emissions channel to select',
                                        key='channel',
@@ -86,48 +99,63 @@ class RenderGUI(Widget):
                                        options=self.channellist,
                                        panel=self.spanel)
         self.spanel.add_widget(self.chan_opt)
+
         self.snap_opt = SettingNumeric(title='Snap',
                                        desc='Snap number to select',
                                        key='snap',
                                        section='renderer',
                                        panel=self.spanel)
         self.spanel.add_widget(self.snap_opt)
+
+        self.nlamb_opt = SettingNumeric(title='NLamb',
+                                        desc='Number of frequencies to sample during spectra calculations',
+                                        key='nlamb',
+                                        section='renderer',
+                                        panel=self.spanel)
+        self.spanel.add_widget(self.nlamb_opt)
+
         self.opa_opt = SettingBoolean(title='Opacity',
                                       desc='Whether or not to enable opacity in the simulation',
                                       key='opacity',
                                       section='renderer',
                                       panel=self.spanel)
         self.spanel.add_widget(self.opa_opt)
+
         self.alt_opt = SettingNumeric(title='Altitude',
                                       desc='The POV angle above horizontal',
                                       key='altitude',
                                       section='renderer',
                                       panel=self.spanel)
         self.spanel.add_widget(self.alt_opt)
+
         self.azi_opt = SettingNumeric(title='Azimuth',
                                       desc='The POV angle lateral to the x-axis',
                                       key='azimuth',
                                       section='renderer',
                                       panel=self.spanel)
         self.spanel.add_widget(self.azi_opt)
+
         self.dpp_opt = SettingNumeric(title='Distance per Pixel',
                                       desc='Distance in simulation between pixels, specifies zoom',
                                       key='distance_per_pixel',
                                       section='renderer',
                                       panel=self.spanel)
         self.spanel.add_widget(self.dpp_opt)
+
         self.stp_opt = SettingNumeric(title='Step Size',
                                       desc='Magnitude of the integration stepsize, increase for performance',
                                       key='stepsize',
                                       section='renderer',
                                       panel=self.spanel)
         self.spanel.add_widget(self.stp_opt)
+
         self.range_opt = SettingNumeric(title='Dynamic Range',
                                         desc='Orders of magnitude to span in display',
                                         key='log_offset',
                                         section='renderer',
                                         panel=self.spanel)
         self.spanel.add_widget(self.range_opt)
+
         self.s.interface.add_panel(self.spanel, 'Renderer Settings', self.spanel.uid)
 
         self._keyboard_open()
@@ -146,6 +174,10 @@ class RenderGUI(Widget):
             self.snap = int(value)
         elif key == 'channel':
             self.channel = self.channellist.index(value)
+        elif key == 'rendermode':
+            self.mode = value
+        elif key == 'nlamb':
+            self.nlamb = value
         elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize', 'log_offset'):
             setattr(self, key, float(value))
         else:
@@ -224,19 +256,20 @@ class RenderGUI(Widget):
         self.rend.set_snap(self.snap)
 
 #render appropriate data
-        if self.mode == MODE_INTENSITY:
-            temp = self.rend.i_render(self.channel, self.azimuth, -self.altitude,
-                                      opacity=self.rend_opacity, verbose=False)
+        if self.mode == Mode.intensity:
+            print 'intensity'
+            temp = self.get_i_render()
             data, _ = temp
         else:
-            temp = self.rend.il_render(self.channel, self.azimuth, -self.altitude,
-                                       opacity=self.rend_opacity, verbose=False)
+            temp = self.get_il_render()
             data, dfreqs, ny0, _ = temp
 
             self.spect_analyzer.set_data(data, dfreqs, ny0)
-            if self.mode == MODE_DOPPSHIFT:
+            if self.mode == Mode.doppler_shift:
+                print 'doppler shift'
                 data = self.spect_analyzer.quad_regc()
-            elif self.mode == MODE_WIDTH:
+            elif self.mode == Mode.width:
+                print 'fwhm'
                 data = self.spect_analyzer.fwhm()
 
         data = np.log10(data)
@@ -267,9 +300,8 @@ class RenderGUI(Widget):
         self.rend.stepsize = self.stepsize
         self.rend.y_pixel_offset = self.y_pixel_offset
         self.rend.x_pixel_offset = self.x_pixel_offset
-        data = self.rend.i_render(self.channel, self.azimuth, -self.altitude,
-                                  opacity=self.rend_opacity, verbose=False)
-        self.rend.save_irender(output_name, data[0] if self.rend_opacity else data)
+        data = self.get_i_render()
+        self.rend.save_irender(output_name, data[0])
 
     def save_spectra(self):
         output_name = tkFileDialog.asksaveasfilename(title='Spectra Array Filename')
@@ -279,8 +311,7 @@ class RenderGUI(Widget):
         self.rend.stepsize = self.stepsize
         self.rend.y_pixel_offset = self.y_pixel_offset
         self.rend.x_pixel_offset = self.x_pixel_offset
-        data = self.rend.il_render(self.channel, self.azimuth, -self.altitude,
-                                   opacity=self.rend_opacity, verbose=False)
+        data = self.get_il_render()
         self.rend.save_ilrender(output_name, data)
 
     def save_range(self):
@@ -307,17 +338,23 @@ class RenderGUI(Widget):
 
                 self.rend.set_snap(snap)
                 if choice == 'il':
-                    data = self.rend.il_render(self.channel, self.azimuth, -self.altitude,
-                                               opacity=self.rend_opacity, verbose=False)
+                    data = self.get_il_render()
                     self.rend.save_ilrender(save_file, data)
                 elif choice == 'i':
-                    data = self.rend.i_render(self.channel, self.azimuth, -self.altitude,
-                                              opacity=self.rend_opacity, verbose=False)
+                    data = self.get_i_render()
                     if self.rend_opacity:
                         data = data[0]
                     self.rend.save_irender(save_file, data)
 
         srd.dismiss()
+
+    def get_i_render(self):
+        return self.rend.i_render(self.channel, self.azimuth, -self.altitude,
+                                  opacity=self.rend_opacity, verbose=False)
+
+    def get_il_render(self):
+        return self.rend.il_render(self.channel, self.azimuth, -self.altitude, nlamb=self.nlamb,
+                                   opacity=self.rend_opacity, verbose=False)
 
 
 class SaveRangeDialog(Popup):
