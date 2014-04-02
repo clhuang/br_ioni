@@ -22,7 +22,7 @@ Tk().withdraw()
 
 
 BUF_DIMENSIONS = (3840, 2160)  # supports up to 4k screens
-SCALAR_MAP = cm.ScalarMappable(colors.LogNorm(), matplotlib.cm.get_cmap('bone'))
+SCALAR_MAP = cm.ScalarMappable(colors.LogNorm(), matplotlib.cm.get_cmap('jet'))
 
 
 class Mode(object):
@@ -189,7 +189,10 @@ class RenderGUI(Widget):
             setattr(self, key, float(value))
         else:
             return
-        self.update()
+        if section == 'renderer':
+            self.update()
+        else:
+            self.update_display()
 
     def _keyboard_open(self):
         self._keyboard = Window.request_keyboard(self._keyboard_closed, self)
@@ -279,7 +282,10 @@ class RenderGUI(Widget):
                 data = self.spect_analyzer.fwhm()
 
         self.raw_data = data
+        self.update_display()
 
+    def update_display(self):
+        data = self.raw_data
         #data = np.log10(data)
         #data = (data + self.log_offset) * 255 / (data.max() + self.log_offset)
         #data = data / data.max() * 255
