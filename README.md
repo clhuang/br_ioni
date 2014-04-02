@@ -10,10 +10,6 @@ Prerequisites
 
 Please modify the include directory in line 168 of Renderer/\_\_init\_\_.py to suit your CUDA setup.
 
-Notes on OS X 10.8:
-Kivy compilation seems to not work on OSX 10.8; but compiling on 10.6 and copying binaries over appears to work fine.
-"options='-ccbin=/usr/bin/llvm-g++-4.2'" needs to be added in Renderer/\_\_init\_\_.py in line 167.
-
 To run the GUI:
 Run "kivy br\_ioni [args]" in the parent directory of the repository.
 The parameters are:
