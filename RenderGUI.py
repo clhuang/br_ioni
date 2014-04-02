@@ -13,7 +13,6 @@ from kivy.uix.settings import SettingsPanel, SettingOptions, SettingNumeric, Set
 from kivy.uix.popup import Popup
 from Tkinter import Tk
 from matplotlib import cm, colors
-import matplotlib.cm
 import tkFileDialog
 
 kivy.require('1.8.0')
@@ -22,7 +21,8 @@ Tk().withdraw()
 
 
 BUF_DIMENSIONS = (3840, 2160)  # supports up to 4k screens
-SCALAR_MAP = cm.ScalarMappable(colors.LogNorm(), matplotlib.cm.get_cmap('jet'))
+LOGNORM = colors.LogNorm()
+SCALAR_MAP = cm.ScalarMappable(LOGNORM, cm.bone)
 
 
 class Mode(object):
@@ -286,12 +286,17 @@ class RenderGUI(Widget):
 
     def update_display(self):
         data = self.raw_data
-        #data = np.log10(data)
-        #data = (data + self.log_offset) * 255 / (data.max() + self.log_offset)
-        #data = data / data.max() * 255
-        SCALAR_MAP.set_array(data)
-        #SCALAR_MAP.autoscale()
-        SCALAR_MAP.set_clim(data.max() * 0.1 ** self.log_offset, data.max())
+        bounds = (np.nanmin(data), np.nanmax(data))
+        if bounds[0] >= 0:  # use log-based approach
+            SCALAR_MAP.set_norm(LOGNORM)
+            SCALAR_MAP.set_cmap(cm.bone)
+            SCALAR_MAP.set_clim(bounds[1] * 0.1 ** self.log_offset, bounds[1])
+        else:  # use symlog approach
+            b2 = max((abs(bounds[0]), bounds[1]))
+            SCALAR_MAP.set_cmap(cm.PiYG)
+            SCALAR_MAP.set_norm(colors.SymLogNorm(b2 * 0.1 ** self.log_offset))
+            SCALAR_MAP.set_clim(-b2, b2)
+
         data = SCALAR_MAP.to_rgba(data) * 255
         data = np.clip(data, 0, 255).astype('uint8')
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
