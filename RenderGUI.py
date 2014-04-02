@@ -84,9 +84,14 @@ class RenderGUI(Widget):
                                              'altitude': self.altitude,
                                              'azimuth': self.azimuth,
                                              'distance_per_pixel': self.distance_per_pixel,
-                                             'log_offset': self.log_offset,
                                              'stepsize': self.stepsize})
+        self.config.setdefaults('display', {'log_offset': self.log_offset})
+
         self.spanel = SettingsPanel(settings=self.s, title='Render Settings', config=self.config)
+        self.s.interface.add_panel(self.spanel, 'Render Settings', self.spanel.uid)
+
+        self.dpanel = SettingsPanel(settings=self.s, title='Display Settings', config=self.config)
+        self.s.interface.add_panel(self.dpanel, 'Display Settings', self.dpanel.uid)
 
         self.mode_opt = SettingOptions(title='Render Mode',
                                        desc='What to simulate and display',
@@ -156,11 +161,9 @@ class RenderGUI(Widget):
         self.range_opt = SettingNumeric(title='Dynamic Range',
                                         desc='Orders of magnitude to span in display',
                                         key='log_offset',
-                                        section='renderer',
+                                        section='display',
                                         panel=self.spanel)
-        self.spanel.add_widget(self.range_opt)
-
-        self.s.interface.add_panel(self.spanel, 'Renderer Settings', self.spanel.uid)
+        self.dpanel.add_widget(self.range_opt)
 
         self._keyboard_open()
         Window.bind(on_resize=self._on_resize)
@@ -281,7 +284,8 @@ class RenderGUI(Widget):
         #data = (data + self.log_offset) * 255 / (data.max() + self.log_offset)
         #data = data / data.max() * 255
         SCALAR_MAP.set_array(data)
-        SCALAR_MAP.autoscale()
+        #SCALAR_MAP.autoscale()
+        SCALAR_MAP.set_clim(data.max() * 0.1 ** self.log_offset, data.max())
         data = SCALAR_MAP.to_rgba(data) * 255
         data = np.clip(data, 0, 255).astype('uint8')
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
