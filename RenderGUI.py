@@ -301,22 +301,25 @@ class RenderGUI(Widget):
             temp = self.get_i_render()
             data, _ = temp
             self.raw_spectra = None
+            self.raw_data = data
         else:
             temp = self.get_il_render()
             data, dfreqs, ny0, _ = temp
             self.raw_spectra = data
-
             self.spect_analyzer.set_data(data, dfreqs, ny0)
+
+        self.update_display()
+
+    def update_display(self):
+        if self.mode != Mode.intensity:
             if self.mode == Mode.doppler_shift:
                 data = self.spect_analyzer.quad_regc()
             elif self.mode == Mode.width:
                 data = self.spect_analyzer.fwhm()
+            self.raw_data = data
+        else:
+            data = self.raw_data
 
-        self.raw_data = data
-        self.update_display()
-
-    def update_display(self):
-        data = self.raw_data
         bounds = (np.nanmin(data), np.nanmax(data))
         if bounds[0] >= 0:  # use log-based approach
             #SCALAR_MAP.set_norm(LOGNORM)
