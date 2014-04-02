@@ -12,6 +12,8 @@ from kivy.config import ConfigParser
 from kivy.uix.settings import SettingsPanel, SettingOptions, SettingNumeric, SettingBoolean
 from kivy.uix.popup import Popup
 from Tkinter import Tk
+from matplotlib import cm, colors
+import matplotlib.cm
 import tkFileDialog
 
 kivy.require('1.8.0')
@@ -20,6 +22,7 @@ Tk().withdraw()
 
 
 BUF_DIMENSIONS = (3840, 2160)  # supports up to 4k screens
+SCALAR_MAP = cm.ScalarMappable(colors.LogNorm(), matplotlib.cm.get_cmap('bone'))
 
 
 class Mode(object):
@@ -63,7 +66,7 @@ class RenderGUI(Widget):
         super(RenderGUI, self).__init__(**kwargs)
 
         self.rend = rend
-        self.buffer_array = np.empty(BUF_DIMENSIONS[::-1], dtype='uint8')
+        self.buffer_array = np.empty(BUF_DIMENSIONS[::-1] + (4, ), dtype='uint8')
         self.distance_per_pixel = self.rend.distance_per_pixel
         self.stepsize = self.rend.stepsize
 
@@ -76,6 +79,7 @@ class RenderGUI(Widget):
         self.config.setdefaults('renderer', {'rendermode': Mode.intensity,
                                              'channel': self.channellist[0],
                                              'snap': self.rend.snap,
+                                             'nlamb': self.nlamb,
                                              'opacity': 0,
                                              'altitude': self.altitude,
                                              'azimuth': self.azimuth,
@@ -177,7 +181,7 @@ class RenderGUI(Widget):
         elif key == 'rendermode':
             self.mode = value
         elif key == 'nlamb':
-            self.nlamb = value
+            self.nlamb = int(value)
         elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize', 'log_offset'):
             setattr(self, key, float(value))
         else:
@@ -257,32 +261,38 @@ class RenderGUI(Widget):
 
 #render appropriate data
         if self.mode == Mode.intensity:
-            print 'intensity'
             temp = self.get_i_render()
             data, _ = temp
+            self.raw_spectra = None
         else:
             temp = self.get_il_render()
             data, dfreqs, ny0, _ = temp
+            self.raw_spectra = data
 
             self.spect_analyzer.set_data(data, dfreqs, ny0)
             if self.mode == Mode.doppler_shift:
-                print 'doppler shift'
                 data = self.spect_analyzer.quad_regc()
             elif self.mode == Mode.width:
-                print 'fwhm'
                 data = self.spect_analyzer.fwhm()
 
-        data = np.log10(data)
-        data = (data + self.log_offset) * 255 / (data.max() + self.log_offset)
+        self.raw_data = data
+
+        #data = np.log10(data)
+        #data = (data + self.log_offset) * 255 / (data.max() + self.log_offset)
+        #data = data / data.max() * 255
+        SCALAR_MAP.set_array(data)
+        SCALAR_MAP.autoscale()
+        data = SCALAR_MAP.to_rgba(data) * 255
         data = np.clip(data, 0, 255).astype('uint8')
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
 
         buf = np.getbuffer(self.buffer_array)
 
         # then blit the buffer
-        self.texture.blit_buffer(buf[:], colorfmt='luminance', bufferfmt='ubyte')
+        self.texture.blit_buffer(buf[:], colorfmt='rgba', bufferfmt='ubyte')
 
 #update values in GUI
+        self.nlamb_opt.value = str(self.nlamb)
         self.azi_opt.value = str(self.azimuth)
         self.alt_opt.value = str(self.altitude)
         self.range_opt.value = str(self.log_offset)
@@ -296,23 +306,19 @@ class RenderGUI(Widget):
         output_name = tkFileDialog.asksaveasfilename(title='Image Array Filename')
         if not output_name:
             return
-        self.rend.distance_per_pixel = self.distance_per_pixel
-        self.rend.stepsize = self.stepsize
-        self.rend.y_pixel_offset = self.y_pixel_offset
-        self.rend.x_pixel_offset = self.x_pixel_offset
-        data = self.get_i_render()
-        self.rend.save_irender(output_name, data[0])
+        self.rend.save_irender(output_name, self.raw_data)
 
     def save_spectra(self):
         output_name = tkFileDialog.asksaveasfilename(title='Spectra Array Filename')
         if not output_name:
             return
-        self.rend.distance_per_pixel = self.distance_per_pixel
-        self.rend.stepsize = self.stepsize
-        self.rend.y_pixel_offset = self.y_pixel_offset
-        self.rend.x_pixel_offset = self.x_pixel_offset
-        data = self.get_il_render()
-        self.rend.save_ilrender(output_name, data)
+        if not self.raw_spectra:
+            self.rend.distance_per_pixel = self.distance_per_pixel
+            self.rend.stepsize = self.stepsize
+            self.rend.y_pixel_offset = self.y_pixel_offset
+            self.rend.x_pixel_offset = self.x_pixel_offset
+            self.raw_spectra = self.get_il_render()
+        self.rend.save_ilrender(output_name, self.raw_spectra)
 
     def save_range(self):
         self.saverangedialog.rend_choice = None
