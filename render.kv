@@ -103,6 +103,7 @@
 
 <RenderGUI>:
     s: settings
+    cbtxt: colorbartxt
 
     canvas:
         Rectangle:
@@ -110,6 +111,17 @@
             pos: (0,0)
             texture: root.texture
             size: root.texture_size
+
+        Rectangle:
+            id: colorbar
+            pos: (50, 50)
+            texture: root.cbtex
+            size: root.cbsize
+
+    Label:
+        id: colorbartxt
+        x: 72
+        text: ''
 
     GridLayout:
         cols: 5

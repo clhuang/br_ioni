@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import numpy as np
 from string import Template
 from br_ioni import spectAnlys
@@ -77,6 +79,7 @@ class RenderGUI(Widget):
     mode = Mode.intensity
     spect_analyzer = spectAnlys.Analyzer()
     nlamb = NumericProperty(41)
+    cbsize = (30, 3000)
 
     helptext = ('Pan l/r: a/d\n'
                 'Tilt u/d: w/s\n'
@@ -94,6 +97,7 @@ class RenderGUI(Widget):
         import os.path
         self.texture = Texture.create(size=BUF_DIMENSIONS)
         self.texture_size = BUF_DIMENSIONS
+        self.cbtex = Texture.create(size=self.cbsize)
         super(RenderGUI, self).__init__(**kwargs)
 
         self.rend = rend
@@ -279,6 +283,7 @@ class RenderGUI(Widget):
     def _on_resize(self, window, width, height):
         self.rend.projection_x_size, self.rend.projection_y_size = width, height
         self.s.size = (self.s.size[0], height)
+        self.cbsize = (self.cbsize[0], height - 100)
         self.update()
 
     def update(self):
@@ -333,13 +338,26 @@ class RenderGUI(Widget):
             SCALAR_MAP.set_clim(-b2, b2)
 
         data = SCALAR_MAP.to_rgba(data) * 255
-        data = np.clip(data, 0, 255).astype('uint8')
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
 
-        buf = np.getbuffer(self.buffer_array)
+        cbtext = '\n'
+        nvals = 10
+        for val in reversed(SCALAR_MAP.norm.inverse(np.linspace(0, 1, nvals))):
+            cbtext += '%.3e\n' % val
+
+        self.cbtxt.text = cbtext[:-1]
+        self.cbtxt.line_height = self.cbsize[1] / (nvals - 1) / (self.cbtxt.font_size + 3)
+        self.cbtxt.center_y = 50 + self.cbsize[1] / 2 + self.cbtxt.font_size / 2
 
         # then blit the buffer
-        self.texture.blit_buffer(buf[:], colorfmt='rgba', bufferfmt='ubyte')
+        self.texture.blit_buffer(self.buffer_array.tostring(), colorfmt='rgba')
+
+        # colorbar generation
+        SCALAR_MAP.set_norm(colors.NoNorm())
+        cb_raw = np.empty(self.cbsize[::-1])
+        cb_raw[:] = np.expand_dims(np.linspace(0, 1, self.cbsize[1]), 1)
+        cb_data = SCALAR_MAP.to_rgba(cb_raw) * 255
+        self.cbtex.blit_buffer(cb_data.astype('uint8').tostring(), size=self.cbsize, colorfmt='rgba')
 
 #update values in GUI
         self.nlamb_opt.value = str(self.nlamb)
