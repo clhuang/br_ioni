@@ -11,10 +11,10 @@ from Renderer import Renderer
 
 EE = 1.602189e-12
 HH = 6.626176e-27
-CC = 2.99792458e10
-CCA = CC * 1e8
-HCE = HH / EE * CC * 1e8
-HC2 = 2 * HH * CC * 1e24
+CC = 2.99792458e8
+CCA = CC * 1e10
+HCE = HH / EE * CC * 1e10
+HC2 = 2 * HH * CC * 1e26
 
 MP = 1.67262178e-27
 KB = 1.3806488e-23
@@ -136,7 +136,7 @@ class EmissivityRenderer(Renderer):
 
         for channel in channels:
             dopp_width = dopp_width_range * self.ny0[channel] /\
-                CC * 1e2 * m.sqrt(2 * KB * TEMAX / self.awgt[channel] / MP) / 2
+                CC * m.sqrt(2 * KB * TEMAX / self.awgt[channel] / MP) / 2
             cmin = CCA / (self.ny0[channel] + dopp_width)
             cmax = CCA / (self.ny0[channel] - dopp_width)
             lmin = min(cmin, lmin)
@@ -350,9 +350,9 @@ class StaticEmRenderer(EmissivityRenderer):
         Otherwise generates test_lambdas using nlamb and dopp_width_range
         dopp_width_range specifies the frequency range (frange = dopp_width_range * dopp_width at tmax)
         '''
-        dopp_width0 = self.ny0[channel] / CC * 1e2 * m.sqrt(2 * KB / self.awgt[channel] / MP)
+        dopp_width0 = self.ny0[channel] / CC * m.sqrt(2 * KB / self.awgt[channel] / MP)
 
-        dny = dopp_width_range * 1.0 / nlamb * dopp_width0 * m.sqrt(TEMAX)
+        dny = dopp_width_range * dopp_width0 * m.sqrt(TEMAX) / nlamb
         if dnus is None:
             dnus = np.empty(nlamb, dtype='float32')
             for i in xrange(nlamb):
@@ -456,7 +456,7 @@ class TDIEmRenderer(EmissivityRenderer):
 
         for _ in xrange(nk):
             datstring = shlex.split(data.pop(0))
-            ev = float(datstring[0]) * CC * HH / EE
+            ev = float(datstring[0]) * CC * 1e2 * HH / EE
             g = float(datstring[1])
             label = datstring[2]
             ion = int(datstring[3])
@@ -558,9 +558,9 @@ class TDIEmRenderer(EmissivityRenderer):
             self.level = level
 
         ny0 = CCA / self.trns[level].alamb
-        dopp_width0 = ny0 / (CC / 1e2) * m.sqrt(2 * KB / self.awgt / MP)
+        dopp_width0 = ny0 / CC * m.sqrt(2 * KB / self.awgt / MP)
 
-        dny = dopp_width_range * 1.0 / nlamb * dopp_width0 * m.sqrt(TEMAX)
+        dny = dopp_width_range * dopp_width0 * m.sqrt(TEMAX) / nlamb
         if dnus is None:
             dnus = np.empty(nlamb, dtype='float32')
             for i in xrange(nlamb):
@@ -633,7 +633,7 @@ class TDIEmRenderer(EmissivityRenderer):
 
         tline = self.trns[level]
         ion_densities = self.oscdata.getooevar(tline.jrad)
-        return ((HH * CC * 1e-2 / (tline.alamb * 1e-10) * tline.a_ul / (4 * m.pi)) * ion_densities)[..., :self.locph]
+        return ((HH * CC / (tline.alamb * 1e-10) * tline.a_ul / (4 * m.pi)) * ion_densities)[..., :self.locph]
 
     def channellist(self):
         return [self.egis[t.irad].label + " -->" + self.egis[t.jrad].label for t in self.trns]

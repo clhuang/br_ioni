@@ -126,15 +126,11 @@
     GridLayout:
         cols: 5
         rows: 1
-        col_default_width: 95
+        col_default_width: 100
         row_default_height: 30
         row_force_default: True
         spacing: [5, 5]
         pos: (10, root.height - 110)
-
-        ToggleButton:
-            id: showhelp
-            text: 'Hide help' if self.state == 'down' else 'Show help'
 
         Button:
             id: showsettings
@@ -156,9 +152,13 @@
             text: 'Save Range'
             on_press: root.save_range()
 
+        ToggleButton:
+            id: showhelp
+            text: 'Hide help' if self.state == 'down' else 'Show help'
+
     Label:
         font_size: 15
-        center_x: 110
+        x: showhelp.x
         top: root.height - 80
         valign: 'top'
         text: root.helptext if showhelp.state == 'down' else ""

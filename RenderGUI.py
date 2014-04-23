@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import numpy as np
 from string import Template
-from br_ioni import spectAnlys
+from br_ioni import spectAnlys, CCA
 
 import kivy
 from kivy.app import App
@@ -75,6 +75,7 @@ class RenderGUI(Widget):
     rend_opacity = BooleanProperty(False)
     channel = NumericProperty(0)
     log_offset = NumericProperty(6)
+    cbar_num = NumericProperty(10)
     snap = NumericProperty(0)
     mode = Mode.intensity
     spect_analyzer = spectAnlys.Analyzer()
@@ -120,7 +121,8 @@ class RenderGUI(Widget):
                                              'azimuth': self.azimuth,
                                              'distance_per_pixel': self.distance_per_pixel,
                                              'stepsize': self.stepsize})
-        self.config.setdefaults('display', {'log_offset': self.log_offset})
+        self.config.setdefaults('display', {'log_offset': self.log_offset,
+                                            'cbar_num': self.cbar_num})
 
         self.spanel = SettingsPanel(settings=self.s, title='Render Settings', config=self.config)
         self.s.interface.add_panel(self.spanel, 'Render Settings', self.spanel.uid)
@@ -200,6 +202,13 @@ class RenderGUI(Widget):
                                         panel=self.spanel)
         self.dpanel.add_widget(self.range_opt)
 
+        self.cbarnum_opt = SettingNumeric(title='Colorbar Numbers',
+                                          desc='Number of data points to indicate on the colorbar',
+                                          key='cbar_num',
+                                          section='display',
+                                          panel=self.spanel)
+        self.dpanel.add_widget(self.cbarnum_opt)
+
         self._keyboard_open()
         Window.bind(on_resize=self._on_resize)
 #initial update
@@ -220,7 +229,7 @@ class RenderGUI(Widget):
             self.mode = value
         elif key == 'nlamb':
             self.nlamb = int(value)
-        elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize', 'log_offset'):
+        elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize', 'log_offset', 'cbar_num'):
             setattr(self, key, float(value))
         else:
             return
@@ -319,8 +328,10 @@ class RenderGUI(Widget):
         if self.mode != Mode.intensity:
             if self.mode == Mode.doppler_shift:
                 data = self.spect_analyzer.quad_regc()
+                data *= -CCA / self.spect_analyzer.center_freq ** 2  # convert to angstroms
             elif self.mode == Mode.width:
                 data = self.spect_analyzer.fwhm()
+                data *= CCA / self.spect_analyzer.center_freq ** 2  # convert to angstroms
             self.raw_data = data
         else:
             data = self.raw_data
@@ -341,7 +352,7 @@ class RenderGUI(Widget):
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
 
         cbtext = '\n'
-        nvals = 10
+        nvals = self.cbar_num
         for val in reversed(SCALAR_MAP.norm.inverse(np.linspace(0, 1, nvals))):
             cbtext += '%.3e\n' % val
 
