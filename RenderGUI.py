@@ -2,7 +2,7 @@ from __future__ import print_function
 
 import numpy as np
 from string import Template
-from br_ioni import spectAnlys, CCA
+from br_ioni import spectAnlys, CC
 
 import kivy
 from kivy.app import App
@@ -327,16 +327,13 @@ class RenderGUI(Widget):
     def update_display(self):
         if self.mode != Mode.intensity:
             if self.mode == Mode.doppler_shift:
-                data = self.spect_analyzer.quad_regc()
-                data *= -CCA / self.spect_analyzer.center_freq ** 2  # convert to angstroms
+                self.raw_data = self.spect_analyzer.quad_regc()
+                self.raw_data *= -CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
             elif self.mode == Mode.width:
-                data = self.spect_analyzer.fwhm()
-                data *= CCA / self.spect_analyzer.center_freq ** 2  # convert to angstroms
-            self.raw_data = data
-        else:
-            data = self.raw_data
+                self.raw_data = self.spect_analyzer.fwhm()
+                self.raw_data *= CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
 
-        bounds = (np.nanmin(data), np.nanmax(data))
+        bounds = (np.nanmin(self.raw_data), np.nanmax(self.raw_data))
         if bounds[0] >= 0:  # use log-based approach
             #SCALAR_MAP.set_norm(LOGNORM)
             SCALAR_MAP.set_norm(colors.SymLogNorm(bounds[1] * 0.1 ** self.log_offset))
@@ -348,7 +345,7 @@ class RenderGUI(Widget):
             SCALAR_MAP.set_norm(colors.SymLogNorm(b2 * 0.1 ** self.log_offset))
             SCALAR_MAP.set_clim(-b2, b2)
 
-        data = SCALAR_MAP.to_rgba(data) * 255
+        data = SCALAR_MAP.to_rgba(self.raw_data) * 255
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
 
         cbtext = '\n'
