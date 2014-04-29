@@ -1,5 +1,6 @@
 from __future__ import print_function
 
+import os.path
 import numpy as np
 from string import Template
 from br_ioni import spectAnlys, CC
@@ -62,6 +63,7 @@ class Mode(object):
     intensity = 'Intensity'
     doppler_shift = 'Doppler Shift'
     width = 'FWHM'
+    asym = 'Asymmetries'
 
 
 class RenderGUI(Widget):
@@ -81,6 +83,8 @@ class RenderGUI(Widget):
     spect_analyzer = spectAnlys.Analyzer()
     nlamb = NumericProperty(41)
     cbsize = (30, 3000)
+    asym_sep = NumericProperty(0)
+    asym_width = NumericProperty(0)
 
     helptext = ('Pan l/r: a/d\n'
                 'Tilt u/d: w/s\n'
@@ -95,7 +99,6 @@ class RenderGUI(Widget):
     initialized = False
 
     def __init__(self, rend, **kwargs):
-        import os.path
         self.texture = Texture.create(size=BUF_DIMENSIONS)
         self.texture_size = BUF_DIMENSIONS
         self.cbtex = Texture.create(size=self.cbsize)
@@ -112,17 +115,19 @@ class RenderGUI(Widget):
 
         self.config = ConfigParser()
         self.channellist = [os.path.basename(os.path.splitext(a)[0]) for a in self.rend.channellist()]
-        self.config.setdefaults('renderer', {'rendermode': Mode.intensity,
+        self.config.setdefaults('renderer', {'rendermode': self.mode,
                                              'channel': self.channellist[0],
                                              'snap': self.rend.snap,
                                              'nlamb': self.nlamb,
-                                             'opacity': 0,
+                                             'opacity': int(self.rend_opacity),
                                              'altitude': self.altitude,
                                              'azimuth': self.azimuth,
                                              'distance_per_pixel': self.distance_per_pixel,
                                              'stepsize': self.stepsize})
         self.config.setdefaults('display', {'log_offset': self.log_offset,
-                                            'cbar_num': self.cbar_num})
+                                            'cbar_num': self.cbar_num,
+                                            'asym_sep': self.asym_sep,
+                                            'asym_width': self.asym_width})
 
         self.spanel = SettingsPanel(settings=self.s, title='Render Settings', config=self.config)
         self.s.interface.add_panel(self.spanel, 'Render Settings', self.spanel.uid)
@@ -209,6 +214,20 @@ class RenderGUI(Widget):
                                           panel=self.spanel)
         self.dpanel.add_widget(self.cbarnum_opt)
 
+        self.asym_width_opt = SettingNumeric(title='Asymmetry Window Width',
+                                             desc='Width of integration window, in km/s',
+                                             key='asym_width',
+                                             section='display',
+                                             panel=self.spanel)
+        self.dpanel.add_widget(self.asym_width_opt)
+
+        self.asym_sep_opt = SettingNumeric(title='Asymmetry Window Separation',
+                                           desc='Separation of integration windows, in km/s',
+                                           key='asym_sep',
+                                           section='display',
+                                           panel=self.spanel)
+        self.dpanel.add_widget(self.asym_sep_opt)
+
         self._keyboard_open()
         Window.bind(on_resize=self._on_resize)
 #initial update
@@ -218,6 +237,9 @@ class RenderGUI(Widget):
         self.initialized = True
 
     def _settings_change(self, section, key, value):
+        '''
+        Called on setting panel change, updates values in renderer config
+        '''
         self._keyboard_open()
         if key == 'opacity':
             self.rend_opacity = (value == '1')
@@ -229,7 +251,8 @@ class RenderGUI(Widget):
             self.mode = value
         elif key == 'nlamb':
             self.nlamb = int(value)
-        elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize', 'log_offset', 'cbar_num'):
+        elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize',
+                     'log_offset', 'cbar_num', 'asym_width', 'asym_sep'):
             setattr(self, key, float(value))
         else:
             return
@@ -290,12 +313,18 @@ class RenderGUI(Widget):
         self.update()
 
     def _on_resize(self, window, width, height):
+        '''
+        Rerenders, resizes objects on window resize
+        '''
         self.rend.projection_x_size, self.rend.projection_y_size = width, height
         self.s.size = (self.s.size[0], height)
         self.cbsize = (self.cbsize[0], height - 100)
         self.update()
 
     def update(self):
+        '''
+        Rerenders stuff, then updates display
+        '''
         if not self.initialized:
             return
 #limit some values
@@ -312,26 +341,34 @@ class RenderGUI(Widget):
 
 #render appropriate data
         if self.mode == Mode.intensity:
-            temp = self.get_i_render()
-            data, _ = temp
+            data, _ = self.get_i_render()
             self.raw_spectra = None
             self.raw_data = data
         else:
-            temp = self.get_il_render()
-            data, dfreqs, ny0, _ = temp
+            data, dfreqs, ny0, _ = self.get_il_render()
             self.raw_spectra = data
             self.spect_analyzer.set_data(data, dfreqs, ny0)
 
         self.update_display()
 
     def update_display(self):
-        if self.mode != Mode.intensity:
-            if self.mode == Mode.doppler_shift:
-                self.raw_data = self.spect_analyzer.quad_regc()
-                self.raw_data *= -CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
-            elif self.mode == Mode.width:
-                self.raw_data = self.spect_analyzer.fwhm()
-                self.raw_data *= CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
+        '''
+        Rejiggers display objects if no rerendering is required
+        '''
+        if self.mode == Mode.intensity:
+            self.unittxt.text = 'Intensity: erg s[sup]-1[/sup] cm[sup]-2[/sup] sr[sup]-1[/sup]'
+        elif self.mode == Mode.doppler_shift:
+            self.raw_data = self.spect_analyzer.quad_regc()
+            self.raw_data *= -CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
+            self.unittxt.text = 'Doppler shift: km/s'
+        elif self.mode == Mode.width:
+            self.raw_data = self.spect_analyzer.fwhm()
+            self.raw_data *= CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
+            self.unittxt.text = 'Line width at half max: km/s'
+        elif self.mode == Mode.asym:
+            self.raw_data = self.spect_analyzer.split_integral_vel(self.asym_sep, self.asym_width, 2)
+            self.raw_data = self.raw_data[..., 1] - self.raw_data[..., 0]
+            self.unittxt.text = 'Intensity: erg s[sup]-1[/sup] cm[sup]-2[/sup] sr[sup]-1[/sup]'
 
         bounds = (np.nanmin(self.raw_data), np.nanmax(self.raw_data))
         if bounds[0] >= 0:  # use log-based approach
