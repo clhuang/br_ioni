@@ -25,7 +25,7 @@ Tk().withdraw()
 
 def cmap_map(function, cmap):
     """ Applies function (which should operate on vectors of shape 3:
-    [r, g, b], on colormap cmap. This routine will break any discontinuous     points in a colormap.
+    [r, g, b], on colormap cmap. This routine will break any discontinuous points in a colormap.
     """
     cdict = cmap._segmentdata
     step_dict = {}
@@ -76,15 +76,15 @@ class RenderGUI(Widget):
     y_pixel_offset = NumericProperty(0)
     rend_opacity = BooleanProperty(False)
     channel = NumericProperty(0)
-    log_offset = NumericProperty(6)
+    log_offset = NumericProperty(6.0)
     cbar_num = NumericProperty(10)
     snap = NumericProperty(0)
-    mode = Mode.intensity
+    rendermode = Mode.intensity
     spect_analyzer = spectAnlys.Analyzer()
     nlamb = NumericProperty(41)
     cbsize = (30, 3000)
-    asym_sep = NumericProperty(0)
-    asym_width = NumericProperty(0)
+    asym_sep = NumericProperty(0.0)
+    asym_width = NumericProperty(0.0)
 
     helptext = ('Pan l/r: a/d\n'
                 'Tilt u/d: w/s\n'
@@ -115,7 +115,7 @@ class RenderGUI(Widget):
 
         self.config = ConfigParser()
         self.channellist = [os.path.basename(os.path.splitext(a)[0]) for a in self.rend.channellist()]
-        self.config.setdefaults('renderer', {'rendermode': self.mode,
+        self.config.setdefaults('renderer', {'rendermode': self.rendermode,
                                              'channel': self.channellist[0],
                                              'snap': self.rend.snap,
                                              'nlamb': self.nlamb,
@@ -232,7 +232,7 @@ class RenderGUI(Widget):
         Window.bind(on_resize=self._on_resize)
 #initial update
         self._on_resize(Window, Window.size[0], Window.size[1])
-        self.saverangedialog = SaveRangeDialog(self, size_hint=(.8, .8), title="Save Range")
+        self._saverangedialog = SaveRangeDialog(self, size_hint=(.8, .8), title="Save Range")
 
         self.initialized = True
 
@@ -243,15 +243,13 @@ class RenderGUI(Widget):
         self._keyboard_open()
         if key == 'opacity':
             self.rend_opacity = (value == '1')
-        elif key == 'snap':
-            self.snap = int(value)
+        elif key in ('snap', 'nlamb'):
+            setattr(self, key, int(value))
         elif key == 'channel':
             self.channel = self.channellist.index(value)
         elif key == 'rendermode':
-            self.mode = value
-        elif key == 'nlamb':
-            self.nlamb = int(value)
-        elif key in ('altitude', 'azimuth', 'distance_per_pixel', 'stepsize',
+            self.rendermode = value
+        elif key in ('rendermode', 'altitude', 'azimuth', 'distance_per_pixel', 'stepsize',
                      'log_offset', 'cbar_num', 'asym_width', 'asym_sep'):
             setattr(self, key, float(value))
         else:
@@ -270,6 +268,9 @@ class RenderGUI(Widget):
         self._keyboard = None
 
     def _on_keyboard_down(self, keyboard, keycode, text, modifiers):
+        '''
+        Does stuff on some keypresses
+        '''
         if keycode[1] == 'w':  # view up
             self.altitude += 2
         elif keycode[1] == 's':  # view down
@@ -284,9 +285,13 @@ class RenderGUI(Widget):
             self.distance_per_pixel /= 0.95
         elif keycode[1] == 'u':  # decrease contrast, increasing dyn range
             self.log_offset += 0.4
+            self.update_display()  # don't rerender, just update display
+            return
         elif keycode[1] == 'i':  # increase contrast
-            if self.log_offset > 1:
+            if self.log_offset > 0:
                 self.log_offset -= 0.4
+            self.update_display()
+            return
         elif keycode[1] == 'up':  # shift view up
             self.y_pixel_offset += 5
         elif keycode[1] == 'down':  # shift view down
@@ -310,6 +315,13 @@ class RenderGUI(Widget):
         else:
             return
 
+        self.alt_opt.value = str(self.altitude)
+        self.azi_opt.value = str(self.azimuth)
+        self.range_opt.value = str(self.log_offset)
+        self.dpp_opt.value = str(round(self.distance_per_pixel, 6))
+        self.stp_opt.value = str(round(self.stepsize, 6))
+        self.opa_opt.value = '1' if self.rend_opacity else '0'
+        self.snap_opt.value = str(self.rend.snap)
         self.update()
 
     def _on_resize(self, window, width, height):
@@ -321,26 +333,26 @@ class RenderGUI(Widget):
         self.cbsize = (self.cbsize[0], height - 100)
         self.update()
 
-    def update(self):
+    def update(self, updatedisplay=True):
         '''
-        Rerenders stuff, then updates display
+        Rerenders stuff and caches it, then updates display if specified
         '''
         if not self.initialized:
             return
-#limit some values
+        # limit some values
         self.azimuth = self.azimuth % 360
         self.altitude = sorted((-90, self.altitude, 90))[1]
         self.snap = sorted(self.rend.snap_range + (self.snap,))[1]
 
-#set values in renderer, and render
+        # set values in renderer, and render
         self.rend.distance_per_pixel = self.distance_per_pixel
         self.rend.stepsize = self.stepsize
         self.rend.y_pixel_offset = self.y_pixel_offset
         self.rend.x_pixel_offset = self.x_pixel_offset
         self.rend.set_snap(self.snap)
 
-#render appropriate data
-        if self.mode == Mode.intensity:
+        # render appropriate data, cache it
+        if self.rendermode == Mode.intensity:
             data, _ = self.get_i_render()
             self.raw_spectra = None
             self.raw_data = data
@@ -349,30 +361,30 @@ class RenderGUI(Widget):
             self.raw_spectra = data
             self.spect_analyzer.set_data(data, dfreqs, ny0)
 
-        self.update_display()
+        if updatedisplay:
+            self.update_display()
 
     def update_display(self):
         '''
         Rejiggers display objects if no rerendering is required
         '''
-        if self.mode == Mode.intensity:
+        if self.rendermode == Mode.intensity:
             self.unittxt.text = 'Intensity: erg s[sup]-1[/sup] cm[sup]-2[/sup] sr[sup]-1[/sup]'
-        elif self.mode == Mode.doppler_shift:
+        elif self.rendermode == Mode.doppler_shift:
             self.raw_data = self.spect_analyzer.quad_regc()
             self.raw_data *= -CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
             self.unittxt.text = 'Doppler shift: km/s'
-        elif self.mode == Mode.width:
+        elif self.rendermode == Mode.width:
             self.raw_data = self.spect_analyzer.fwhm()
             self.raw_data *= CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
             self.unittxt.text = 'Line width at half max: km/s'
-        elif self.mode == Mode.asym:
+        elif self.rendermode == Mode.asym:
             self.raw_data = self.spect_analyzer.split_integral_vel(self.asym_sep, self.asym_width, 2)
             self.raw_data = self.raw_data[..., 1] - self.raw_data[..., 0]
             self.unittxt.text = 'Intensity: erg s[sup]-1[/sup] cm[sup]-2[/sup] sr[sup]-1[/sup]'
 
         bounds = (np.nanmin(self.raw_data), np.nanmax(self.raw_data))
-        if bounds[0] >= 0:  # use log-based approach
-            #SCALAR_MAP.set_norm(LOGNORM)
+        if bounds[0] >= 0:  # use symlog-based approach starting from 0
             SCALAR_MAP.set_norm(colors.SymLogNorm(bounds[1] * 0.1 ** self.log_offset))
             SCALAR_MAP.set_cmap(cm.bone)
             SCALAR_MAP.set_clim(0, bounds[1])
@@ -383,19 +395,16 @@ class RenderGUI(Widget):
             SCALAR_MAP.set_clim(-b2, b2)
 
         data = SCALAR_MAP.to_rgba(self.raw_data) * 255
+
+        # update display buffer
         self.buffer_array[:data.shape[0], :data.shape[1]] = data
-
-        cbtext = '\n'
-        nvals = self.cbar_num
-        for val in reversed(SCALAR_MAP.norm.inverse(np.linspace(0, 1, nvals))):
-            cbtext += '%.3e\n' % val
-
-        self.cbtxt.text = cbtext[:-1]
-        self.cbtxt.line_height = self.cbsize[1] / (nvals - 1) / (self.cbtxt.font_size + 3)
-        self.cbtxt.center_y = 50 + self.cbsize[1] / 2 + self.cbtxt.font_size / 2
-
-        # then blit the buffer
         self.texture.blit_buffer(self.buffer_array.tostring(), colorfmt='rgba')
+
+        # colorbar text generation
+        self.cbtxt.text = '\n' + '\n'.join(('%.3e' % val for val in
+                                            reversed(SCALAR_MAP.norm.inverse(np.linspace(0, 1, self.cbar_num)))))
+        self.cbtxt.line_height = self.cbsize[1] / (self.cbar_num - 1) / (self.cbtxt.font_size + 3)
+        self.cbtxt.center_y = 50 + self.cbsize[1] / 2 + self.cbtxt.font_size / 2
 
         # colorbar generation
         SCALAR_MAP.set_norm(colors.NoNorm())
@@ -403,17 +412,6 @@ class RenderGUI(Widget):
         cb_raw[:] = np.expand_dims(np.linspace(0, 1, self.cbsize[1]), 1)
         cb_data = SCALAR_MAP.to_rgba(cb_raw) * 255
         self.cbtex.blit_buffer(cb_data.astype('uint8').tostring(), size=self.cbsize, colorfmt='rgba')
-
-#update values in GUI
-        self.nlamb_opt.value = str(self.nlamb)
-        self.azi_opt.value = str(self.azimuth)
-        self.alt_opt.value = str(self.altitude)
-        self.range_opt.value = str(self.log_offset)
-        self.dpp_opt.value = str(round(self.distance_per_pixel, 6))
-        self.stp_opt.value = str(round(self.stepsize, 6))
-        self.opa_opt.value = '1' if self.rend_opacity else '0'
-        self.snap_opt.value = str(self.rend.snap)
-        self.canvas.ask_update()
 
     def save_image(self):
         output_name = tkFileDialog.asksaveasfilename(title='Image Array Filename')
@@ -434,8 +432,8 @@ class RenderGUI(Widget):
         self.rend.save_ilrender(output_name, self.raw_spectra)
 
     def save_range(self):
-        self.saverangedialog.rend_choice = None
-        self.saverangedialog.open()
+        self._saverangedialog.rend_choice = None
+        self._saverangedialog.open()
 
     def _renderrangefromdialog(self, srd, choice):
         snap_bounds = sorted((int(srd.slider_snapmin.value), int(srd.slider_snapmax.value)))
@@ -451,21 +449,39 @@ class RenderGUI(Widget):
             ed.open()
             return
 
+        orig_mode, orig_snap, orig_channel = self.rendermode, self.snap, self.channel
+
+        # if spectra is chosen, choose mode that caches spectra
+        if choice == 'il':
+            self.rendermode = Mode.doppler_shift
+
         for snap in snap_range:
+            self.snap = snap
             for channel_id in channel_ids:
+                self.channel = channel_id
                 save_file = save_loct.substitute(num=str(snap), chan=channellist[channel_id])
 
-                self.rend.set_snap(snap)
+                self.update(False)
+
                 if choice == 'il':
-                    data = self.get_il_render()
-                    self.rend.save_ilrender(save_file, data)
+                    self.rend.save_ilrender(save_file, self.raw_spectra)
                 elif choice == 'i':
-                    data = self.get_i_render()
-                    if self.rend_opacity:
-                        data = data[0]
-                    self.rend.save_irender(save_file, data)
+                    # process spectra into raw data if necessary
+                    if self.rendermode == Mode.doppler_shift:
+                        self.raw_data = self.spect_analyzer.quad_regc()
+                        self.raw_data *= -CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
+                    elif self.rendermode == Mode.width:
+                        self.raw_data = self.spect_analyzer.fwhm()
+                        self.raw_data *= CC / 1e3 / self.spect_analyzer.center_freq  # convert to km/s
+                    elif self.rendermode == Mode.asym:
+                        self.raw_data = self.spect_analyzer.split_integral_vel(self.asym_sep, self.asym_width, 2)
+                        self.raw_data = self.raw_data[..., 1] - self.raw_data[..., 0]
+                    self.rend.save_irender(save_file, self.raw_data)
 
         srd.dismiss()
+        self.mode, self.snap, self.channel = orig_mode, orig_snap, orig_channel
+        self.raw_data = self.raw_spectra = None
+        self.update()
 
     def get_i_render(self):
         return self.rend.i_render(self.channel, self.azimuth, -self.altitude,
