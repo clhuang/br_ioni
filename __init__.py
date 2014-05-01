@@ -5,6 +5,7 @@ from collections import namedtuple
 
 import numpy as np
 import pycuda.driver as cuda
+from pycuda import curandom
 
 from bifrost import OSC_data, Rhoeetab, Opatab
 from Renderer import Renderer
@@ -32,6 +33,8 @@ with open(os.path.dirname(os.path.abspath(__file__)) + '/em.cu') as kernelfile:
 
 DEFAULT_LOC = os.path.expanduser('~') + '/LockheedData/ionismalldata'
 DEFAULT_PARAMFILE = 'oxygen-II-VII-iris'
+
+NOISEGEN = curandom.ScrambledSobol32RandomNumberGenerator()
 
 
 class EmissivityRenderer(Renderer):
@@ -698,6 +701,22 @@ def mult_render(self, renderer, sdomain, edomain, step=1, lambd=None, channel=0,
         emiss += demiss
 
     return emiss
+
+
+def noisify_spectra(spectra, snr, gaussian=False):
+    '''
+    Adds Poisson noise to spectra. SNR specified in decibels.
+
+    gaussian specifies whether or not noise is generated according to a gaussian distribution--
+    if false, noise is uniformly distributed.
+    '''
+    nsr = 10.0 ** -snr
+    if gaussian:
+        noise = np.sqrt(spectra) * (NOISEGEN.gen_normal(spectra.shape, 'float32') * nsr).get()
+    else:
+        noise = np.sqrt(spectra) * ((NOISEGEN.gen_uniform(spectra.shape, 'float32') * 2 - 1) * nsr).get()
+
+    return spectra + noise
 
 
 def savearray(name, array):
