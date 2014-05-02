@@ -710,7 +710,10 @@ def noisify_spectra(spectra, snr, gaussian=False):
     gaussian specifies whether or not noise is generated according to a gaussian distribution--
     if false, noise is uniformly distributed.
     '''
-    nsr = 10.0 ** -snr
+    if m.isinf(snr):
+        return spectra
+
+    nsr = 10 ** -snr
     if gaussian:
         noise = np.sqrt(spectra) * (NOISEGEN.gen_normal(spectra.shape, 'float32') * nsr).get()
     else:

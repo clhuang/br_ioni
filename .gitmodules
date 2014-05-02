@@ -6,4 +6,4 @@
 	url = git@github.com:clhuang/br_renderer.git
 [submodule "spectAnlys"]
 	path = spectAnlys
-	url = ../spectAnlys/
+	url = git@github.com:clhuang/spectAnlys.git

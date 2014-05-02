@@ -3,7 +3,7 @@ from __future__ import print_function
 import os.path
 import numpy as np
 from string import Template
-from br_ioni import spectAnlys, CC
+from br_ioni import spectAnlys, CC, noisify_spectra
 
 import kivy
 from kivy.app import App
@@ -85,6 +85,7 @@ class RenderGUI(Widget):
     cbsize = (30, 3000)
     asym_sep = NumericProperty(0.0)
     asym_width = NumericProperty(0.0)
+    noise_snr = NumericProperty(999.)
 
     helptext = ('Pan l/r: a/d\n'
                 'Tilt u/d: w/s\n'
@@ -123,7 +124,8 @@ class RenderGUI(Widget):
                                              'altitude': self.altitude,
                                              'azimuth': self.azimuth,
                                              'distance_per_pixel': self.distance_per_pixel,
-                                             'stepsize': self.stepsize})
+                                             'stepsize': self.stepsize,
+                                             'noise_snr': self.noise_snr})
         self.config.setdefaults('display', {'log_offset': self.log_offset,
                                             'cbar_num': self.cbar_num,
                                             'asym_sep': self.asym_sep,
@@ -200,6 +202,13 @@ class RenderGUI(Widget):
                                       panel=self.spanel)
         self.spanel.add_widget(self.stp_opt)
 
+        self.noise_snr_opt = SettingNumeric(title='Spectral SNR',
+                                            desc=u'Spectral signal to noise ratio, in dB\u2014to disable, set to 999',
+                                            key='noise_snr',
+                                            section='renderer',
+                                            panel=self.spanel)
+        self.spanel.add_widget(self.noise_snr_opt)
+
         self.range_opt = SettingNumeric(title='Dynamic Range',
                                         desc='Orders of magnitude to span in display',
                                         key='log_offset',
@@ -230,7 +239,8 @@ class RenderGUI(Widget):
 
         self._keyboard_open()
         Window.bind(on_resize=self._on_resize)
-#initial update
+
+        #initial update
         self._on_resize(Window, Window.size[0], Window.size[1])
         self._saverangedialog = SaveRangeDialog(self, size_hint=(.8, .8), title="Save Range")
 
@@ -250,7 +260,7 @@ class RenderGUI(Widget):
         elif key == 'rendermode':
             self.rendermode = value
         elif key in ('rendermode', 'altitude', 'azimuth', 'distance_per_pixel', 'stepsize',
-                     'log_offset', 'cbar_num', 'asym_width', 'asym_sep'):
+                     'log_offset', 'cbar_num', 'asym_width', 'asym_sep', 'noise_snr'):
             setattr(self, key, float(value))
         else:
             return
@@ -358,7 +368,8 @@ class RenderGUI(Widget):
             self.raw_data = data
         else:
             data, dfreqs, ny0, _ = self.get_il_render()
-            self.raw_spectra = data
+            self.raw_spectra = noisify_spectra(data, self.noise_snr)
+            self.raw_data = None
             self.spect_analyzer.set_data(data, dfreqs, ny0)
 
         if updatedisplay:
