@@ -703,7 +703,7 @@ def mult_render(self, renderer, sdomain, edomain, step=1, lambd=None, channel=0,
     return emiss
 
 
-def noisify_spectra(spectra, snr, gaussian=False):
+def noisify_spectra(spectra, snr, gaussian=True):
     '''
     Adds Poisson noise to spectra. SNR specified in decibels.
 
@@ -713,7 +713,7 @@ def noisify_spectra(spectra, snr, gaussian=False):
     if m.isinf(snr):
         return spectra
 
-    nsr = 10 ** -snr
+    nsr = 10 ** -(snr / 10.0)
     if gaussian:
         noise = np.sqrt(spectra) * (NOISEGEN.gen_normal(spectra.shape, 'float32') * nsr).get()
     else:

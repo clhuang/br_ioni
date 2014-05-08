@@ -189,7 +189,7 @@ class RenderGUI(Widget):
         self.spanel.add_widget(self.azi_opt)
 
         self.dpp_opt = SettingNumeric(title='Distance per Pixel',
-                                      desc='Distance in simulation between pixels, specifies zoom',
+                                      desc='Distance in simulation between pixels in km, specifies zoom',
                                       key='distance_per_pixel',
                                       section='renderer',
                                       panel=self.spanel)
@@ -368,9 +368,9 @@ class RenderGUI(Widget):
             self.raw_data = data
         else:
             data, dfreqs, ny0, _ = self.get_il_render()
-            self.raw_spectra = noisify_spectra(data, self.noise_snr)
+            self.raw_spectra = (noisify_spectra(data, self.noise_snr), dfreqs, ny0)
             self.raw_data = None
-            self.spect_analyzer.set_data(data, dfreqs, ny0)
+            self.spect_analyzer.set_data(*self.raw_spectra)
 
         if updatedisplay:
             self.update_display()
@@ -434,12 +434,13 @@ class RenderGUI(Widget):
         output_name = tkFileDialog.asksaveasfilename(title='Spectra Array Filename')
         if not output_name:
             return
-        if not self.raw_spectra:
+        if self.raw_spectra is None:
             self.rend.distance_per_pixel = self.distance_per_pixel
             self.rend.stepsize = self.stepsize
             self.rend.y_pixel_offset = self.y_pixel_offset
             self.rend.x_pixel_offset = self.x_pixel_offset
-            self.raw_spectra = self.get_il_render()
+            data, dfreqs, ny0, _ = self.get_il_render()
+            self.raw_spectra = (noisify_spectra(data, self.noise_snr), dfreqs, ny0)
         self.rend.save_ilrender(output_name, self.raw_spectra)
 
     def save_range(self):
