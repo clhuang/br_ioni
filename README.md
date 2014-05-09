@@ -8,7 +8,7 @@ Prerequisites
 - PyCUDA, CUDA 5
 - Kivy 1.8.0 (for running GUI)
 
-Please modify the include directory in line 168 of Renderer/\_\_init\_\_.py to suit your CUDA setup.
+Ensure that environment variable CUDA_HOME is set correctly.
 
 To run the GUI:
 Run "kivy br\_ioni [args]" in the parent directory of the repository.
